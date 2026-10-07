@@ -2,13 +2,13 @@
 # gimp-retouch-plugins one-click installer / reinstaller (Linux)
 # GIMP 3.0.x (apt, ~/.config/GIMP/3.0) and GIMP 3.2.x (Flatpak org.gimp.GIMP --user, ~/.config/GIMP/3.2)
 # Usage: ./install.sh [--gimp 3.0|3.2|all] [--only ours|third-party|all] [--reinstall] [--dry-run]
-#                     [--with-photogimp] [--no-verify] [--backup-dir DIR]
+#                     [--with-photogimp] [--with-raw] [--no-verify] [--backup-dir DIR]
 # Never kills GIMP (and never uses pkill -f). Third-party sources are fetched at the versions pinned in bundle.lock.
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 LOCK="$REPO/bundle.lock"
-GIMP_SEL=all; ONLY=all; REINSTALL=0; DRY=0; PHOTOGIMP=0; VERIFY=1
+GIMP_SEL=all; ONLY=all; REINSTALL=0; DRY=0; PHOTOGIMP=0; WITH_RAW=0; VERIFY=1
 BACKUP_DIR="$HOME/gimp-bundle-backups"
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/gimp-retouch-bundle"
 STATE="${XDG_DATA_HOME:-$HOME/.local/share}/gimp-retouch-bundle"
@@ -21,6 +21,7 @@ while [ $# -gt 0 ]; do
     --reinstall) REINSTALL=1;;
     --dry-run) DRY=1;;
     --with-photogimp) PHOTOGIMP=1;;
+    --with-raw) WITH_RAW=1;;
     --no-verify) VERIFY=0;;
     --backup-dir) BACKUP_DIR="$2"; shift;;
     -h|--help) sed -n 2,7p "$0"; exit 0;;
@@ -195,6 +196,24 @@ tp_photogimp(){ # v
   record $v $id "$([ $DRY = 1 ] && echo would-install || echo installed)"
 }
 
+rt_ver(){ local o; o=$(rawtherapee-cli --version 2>&1 || true); grep -oE 'version [0-9.]+' <<<"$o" | head -1 | cut -d' ' -f2; }  # cli exits non-zero
+tp_rawtherapee(){ # host-level, apt, pinned to Debian 13 version
+  local id=rawtherapee ver; ver=$(lock $id 3)
+  local cur; cur=$(dpkg-query -W -f='${Version}' rawtherapee 2>/dev/null)
+  if [ "$cur" = "$ver" ] && [ "$(rt_ver)" = "${ver%%-*}" ] && [ $REINSTALL = 0 ]; then
+    record host $id "ok (already present $cur)"; return; fi
+  local pk; pk=$(lock $id 5); pk=${pk#*: }
+  local rf=""; [ $REINSTALL = 1 ] && rf="--reinstall"
+  run sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $rf $pk || { record host $id FAILED; return; }
+  if [ $DRY = 0 ]; then
+    local deb; deb=$(ls /var/cache/apt/archives/rawtherapee_${ver/:/%3a}_amd64.deb 2>/dev/null | head -1)
+    if [ -n "$deb" ] && [ "$(sha_of "$deb")" != "$(lock $id 6)" ]; then warn "rawtherapee .deb sha256 differs from lock"; fi
+    [ "$(rt_ver)" = "${ver%%-*}" ] || { record host $id "FAILED (rawtherapee-cli --version)"; return; }
+  fi
+  record host $id "$([ $DRY = 1 ] && echo would-install || echo "installed $ver")"
+}
+if [ $WITH_RAW = 1 ] && [ "$ONLY" != ours ]; then say "host: RawTherapee (RAW -> TIFF, opt-in)"; tp_rawtherapee; fi
+
 for v in $VERS; do
   [ -d "$(profile $v)" ] || run mkdir -p "$(plugdir $v)"
   if [ "$ONLY" != third-party ]; then
@@ -235,6 +254,10 @@ refresh(){ # v : run gimp-console once to rebuild pluginrc, keep profile clean
 declare -A REG
 if [ $VERIFY = 1 ]; then
   mkdir -p "$CACHE"
+  if [ -n "${ACTION[host|rawtherapee]:-}" ]; then
+    REG[host|rawtherapee]=$(r=$(rt_ver); [ -n "$r" ] && echo "cli $r")
+    [ -n "${REG[host|rawtherapee]}" ] || REG[host|rawtherapee]=$([ $DRY = 1 ] && echo "not present" || echo NO)
+  fi
   for v in $VERS; do
     if [ $DRY = 1 ]; then say "GIMP $v: [dry-run] reading existing pluginrc (GIMP not started)"
     else say "GIMP $v: headless registration check"; refresh $v; fi

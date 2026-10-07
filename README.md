@@ -5,6 +5,7 @@ GIMP 3 (3.0 / 3.2) Python 插件集，跨 Linux / Windows。
 ## 插件
 - `fsep_oneclick` — 一键频率分离（尚未人工验证）
 - `dnb_setup` — 一键加深减淡搭建（尚未人工验证），详见 `dnb_setup/README.md`
+- `raw_to_tiff/raw2tiff.sh` — RAW→16 位 TIFF 批量转换（RawTherapee CLI，尚未人工验证），RAW → raw2tiff → batch_export 流程见 `raw_to_tiff/README.md`
 - `batch_export` — 批量导出（尚未人工验证），支持命令行无界面调用，详见 `batch_export/README.md`
 
 ## 一键安装 / 重装（尚未人工验证）
@@ -14,7 +15,7 @@ Linux（GIMP 3.0 apt + GIMP 3.2 Flatpak --user）：
 ./install.sh                              # 安装缺失/版本不符的组件（幂等）
 ./install.sh --reinstall --gimp 3.2 --only ours
 ```
-参数：`--gimp 3.0|3.2|all`、`--only ours|third-party|all`、`--reinstall`、`--dry-run`、`--with-photogimp`（覆盖配置，默认不装）、`--no-verify`、`--backup-dir DIR`。
+参数：`--gimp 3.0|3.2|all`、`--only ours|third-party|all`、`--reinstall`、`--dry-run`、`--with-photogimp`（覆盖配置，默认不装）、`--with-raw`（apt 安装固定版本 RawTherapee 5.11-2+b2，默认不装）、`--no-verify`、`--backup-dir DIR`。
 流程：备份 `~/.config/GIMP/<ver>` 到 `~/gimp-bundle-backups/gimp-config-<时间>.tgz` → 安装本仓库插件 → 按 `bundle.lock` 固定版本从原始来源下载并校验 sha256/commit
 安装第三方插件 → 无界面启动 gimp-console 刷新并检查 pluginrc → 输出汇总表（失败时退出码 1）。
 不会结束正在运行的 GIMP（从不使用 `pkill -f`）；系统级步骤（G'MIC .deb、Resynthesizer 编译安装）需要 sudo。下载缓存：`~/.cache/gimp-retouch-bundle`。
@@ -30,6 +31,7 @@ Windows：`powershell -ExecutionPolicy Bypass -File install.ps1 [-Gimp 3.0|3.2|a
 | Resynthesizer | v3.0 源码编译 (commit 3846f79；**不要用 v3.0.1**) | Flathub 扩展 3.0.1 (commit f14825c) | github.com/bootchk/resynthesizer | GPL-3.0 |
 | Batcher | 1.2.10 zip (sha256) | 1.2.10 zip (sha256) | github.com/kamilburda/batcher | BSD-3-Clause |
 | adjustment-layer | commit cc07757 (文件 sha256) | 同左 | github.com/bunnywaffle/adjustment-layer | GPL-3.0 |
+| RawTherapee（可选，`--with-raw`） | apt 5.11-2+b2（主机级，供 raw2tiff 使用） | 不使用 Flathub 版；3.2 通过 raw2tiff 生成的 TIFF 处理 | Debian trixie | GPL-3.0 |
 | PhotoGIMP（可选） | commit eca3a8f | 同左 | github.com/Diolinux/PhotoGIMP | GPL-3.0 |
 | Chuck Henrich FS v3 / D&B v3 | 不包含（站点 TLS 握手失败，无法固定校验和），需手动安装 | 同左 | chuckhenrich.com | — |
 

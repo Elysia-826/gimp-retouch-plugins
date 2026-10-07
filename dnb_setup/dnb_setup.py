@@ -92,7 +92,7 @@ class DnB(Gimp.PlugIn):
         p.set_image_types("RGB*, GRAY*")
         p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
         p.set_menu_label("一键加深减淡搭建 / One-click Dodge & Burn Setup")
-        p.add_menu_path("<Image>/Filters/人像精修/")
+        p.add_menu_path("<Image>/Filters/修图工具/")
         p.set_documentation("Create a 50% grey Dodge & Burn layer plus hidden luminosity helper group. 创建加深减淡图层与观察层。",
                             "Paint white to dodge, black to burn on the D&B layer. Toggle '观察层 Helper' to inspect unevenness.", name)
         p.set_attribution("Elysia", "Elysia", "2026")

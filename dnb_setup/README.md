@@ -1,6 +1,6 @@
 # 一键加深减淡搭建 / One-click Dodge & Burn Setup (GIMP 3.0.4 + 3.2.6)
 
-Menu: **Filters > 人像精修 > 一键加深减淡搭建 / One-click Dodge & Burn Setup**
+Menu: **Filters > 修图工具 > 一键加深减淡搭建 / One-click Dodge & Burn Setup**
 PDB name: `python-fu-dnb-setup` (args: run-mode, image, drawables, blend-mode = "soft-light"|"overlay", contrast-boost bool)
 
 Creates the following directly above the active layer (pass-through group):

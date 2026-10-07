@@ -108,7 +108,7 @@ class FSep(Gimp.PlugIn):
         p.set_image_types("RGB*, GRAY*")
         p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
         p.set_menu_label("一键频率分离 / One-click Frequency Separation")
-        p.add_menu_path("<Image>/Filters/人像精修/")
+        p.add_menu_path("<Image>/Filters/修图工具/")
         p.set_documentation("Split layer into Low (blur) and High (grain-merge texture) layers in a group. 将图层分离为低频与高频。",
                             "Original layer is hidden and kept untouched below the group. Radius 0 = auto (~4px per 2000px).", name)
         p.set_attribution("Elysia", "Elysia", "2026")

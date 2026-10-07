@@ -35,6 +35,13 @@ for alpha in (False, True):
     if not alpha:
         d=img.duplicate(); d.flatten()
         Gimp.file_save(Gimp.RunMode.NONINTERACTIVE,d,Gio.File.new_for_path(out+"_flat.png"))
+# re-run detection + grayscale
+img=load(); lay=img.get_layers()[0]
+print("DNB1", st(call("python-fu-dnb-setup", img, [lay])))
+print("DNB2", st(call("python-fu-dnb-setup", img, [img.get_layers()[-1]])))
+print("STACK", [l.get_name() for l in img.get_layers()], "SEL", [l.get_name() for l in img.get_selected_layers()])
+img.convert_grayscale(); print("GRAY", st(call("python-fu-dnb-setup", Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(src)) if False else img, [img.get_layers()[-1]])))
+g=load(); g.convert_grayscale(); print("GRAY_FRESH", st(call("python-fu-dnb-setup", g, [g.get_layers()[0]], **{"contrast-boost":True})))
 # error path
 img=load()
 r=call("python-fu-dnb-setup", img, []); print("DNB_empty", st(r))

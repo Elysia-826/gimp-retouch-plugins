@@ -25,3 +25,17 @@ Notes:
 Install: copy fsep_oneclick.py to ~/.config/GIMP/{3.0,3.2}/plug-ins/fsep_oneclick/ and chmod +x.
 Tests: test_fsep.py (python-fu-eval batch), cmp.py (compare flattened vs original).
 - Localization: `set_i18n` is overridden to return False (no catalog), so there's no 'catalog directory does not exist' warning.
+
+## Workflow notes
+- **Heal-select (Resynthesizer) on `High (高频)` BEFORE adding layer masks or extra masked/alpha layers inside the
+  Frequency Separation group**. Resynthesizer needs the target and the surrounding layers to have the same channels, so
+  doing it later can fail with a channel-mismatch error.
+
+## Tolerance (8-bit)
+Flattened result vs **GIMP's own decode** of the source: max 1/255 on both versions. On a 2076x4608 JPEG,
+3.0.4 averages +0.99 and 3.2.6 averages -0.35 (the grain extract/merge rounding differs between versions).
+Comparing against a *different* JPEG decoder (e.g. PIL/libjpeg-turbo) adds up to about 3/255 more decoder difference
+(GIMP vs PIL decode of the same JPEG differs by max 3 even with no plug-in), which explains reports of max 4/255.
+Setting blend/composite space to perceptual changes nothing. Linear makes it much worse. At 16-bit or 32-bit
+precision (Image > Precision, before running) reconstruction is exact (max 0), but the plug-in doesn't convert
+precision automatically, to keep 8-bit Resynthesizer workflows unchanged.

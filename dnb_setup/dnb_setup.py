@@ -28,7 +28,29 @@ def _ok(r, what):
     if r is False:
         raise RuntimeError(what + " failed / 失败")
 
+def find_existing(image):
+    """Return the D&B paint layer of an existing 'Dodge & Burn' group, if any."""
+    stack = list(image.get_layers())
+    while stack:
+        l = stack.pop(0)
+        if l.is_group():
+            if l.get_name() == "Dodge & Burn":
+                for c in l.get_children():
+                    if c.get_name().startswith("加深减淡 D&B"):
+                        return c
+            stack.extend(l.get_children())
+    return None
+
 def setup(image, layer, blend, contrast, on_top):
+    existing = find_existing(image)
+    if existing is not None:
+        image.set_selected_layers([existing])
+        Gimp.context_set_foreground(_color("white"))
+        Gimp.context_set_background(_color("black"))
+        Gimp.message("已存在 'Dodge & Burn' 组，已选中其 D&B 图层，未重复创建。\n"
+                     "'Dodge & Burn' group already exists; selected its D&B layer instead of creating another.")
+        Gimp.displays_flush()
+        return
     image.undo_group_start()
     try:
         # Snapshot visible composite first (works when a group is active)
@@ -53,7 +75,8 @@ def setup(image, layer, blend, contrast, on_top):
             # Desaturated (luminance) visible composite + S-curve, Normal mode
             image.insert_layer(con, helper, 0)
             con.set_mode(Gimp.LayerMode.NORMAL); con.set_opacity(100.0); con.set_visible(True)
-            _ok(con.desaturate(Gimp.DesaturateMode.LUMINANCE), "desaturate")
+            if not con.is_gray():
+                _ok(con.desaturate(Gimp.DesaturateMode.LUMINANCE), "desaturate")
             _ok(con.curves_spline(Gimp.HistogramChannel.VALUE,
                               [0.0, 0.0, 0.25, 0.12, 0.5, 0.5, 0.75, 0.88, 1.0, 1.0]), "curves")
         lum = _new_layer(image, "黑白 Luminosity", Gimp.LayerMode.HSL_COLOR)

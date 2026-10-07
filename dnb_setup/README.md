@@ -15,3 +15,5 @@ Any failure (fill/desaturate/curves etc.) returns EXECUTION_ERROR; bad input ret
 Everything is one undo group. The Contrast layer is a snapshot: re-run the setup or delete it after big edits.
 Tests: test_dnb.py (env DNB_IN, DNB_OUT, HELPER=1).
 Localization: `set_i18n` returns False, so there's no missing-catalog warning.
+- Running it again when a `Dodge & Burn` group already exists doesn't create a duplicate. It selects the existing D&B layer, resets FG/BG and returns SUCCESS with a message.
+- On grayscale images the desaturate step is skipped (it's already gray).

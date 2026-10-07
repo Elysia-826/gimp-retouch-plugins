@@ -1,9 +1,10 @@
 # gimp-retouch-plugins
 
-GIMP 3 (3.0 / 3.2) 人像精修 Python 插件集，跨 Linux / Windows。
+GIMP 3 (3.0 / 3.2) Python 插件集，跨 Linux / Windows。
 
 ## 插件
-- `fsep_oneclick` — 一键频率分离（滤镜 > 人像精修 > 一键频率分离）
+- `fsep_oneclick` — 一键频率分离（尚未人工验证）
+- `dnb_setup` — 一键加深减淡搭建（尚未人工验证），详见 `dnb_setup/README.md`
 
 ## 安装
 把插件文件夹复制到 GIMP 插件目录（文件夹名与 .py 同名，Linux 需 `chmod +x`），重启 GIMP：
@@ -12,6 +13,3 @@ GIMP 3 (3.0 / 3.2) 人像精修 Python 插件集，跨 Linux / Windows。
 
 ## License
 MIT
-
-## dnb_setup
-One-click Dodge & Burn setup — see dnb_setup/README.md

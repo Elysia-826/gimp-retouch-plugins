@@ -1,7 +1,8 @@
 # raw2tiff — RAW → 16-bit TIFF（尚未人工验证 / not manually verified）
 
 `raw2tiff.sh` batch-converts CR3/CR2/NEF/ARW/RAF/DNG/ORF/RW2 (case-insensitive, non-recursive) with **rawtherapee-cli**
-(RawTherapee 5.11, Debian package `rawtherapee=5.11-2+b2`; install with `./install.sh --with-raw`).
+(RawTherapee 5.11, Debian package `rawtherapee=5.11-2+b2`). `./install.sh --add raw2tiff` (= `--with-raw`) installs this script as
+`~/.local/bin/raw2tiff` and pulls in RawTherapee automatically.
 
 ```bash
 raw_to_tiff/raw2tiff.sh -i ~/photos/raw -o ~/photos/tiff [-p my.pp3] [-z] [-b 16|16f|32] [--suffix S] [--overwrite]

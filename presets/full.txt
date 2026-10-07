@@ -1,0 +1,10 @@
+# everything except photogimp
+fsep_oneclick
+dnb_setup
+batch_export
+raw2tiff
+gmic
+resynthesizer
+batcher
+adjustment-layer
+rawtherapee

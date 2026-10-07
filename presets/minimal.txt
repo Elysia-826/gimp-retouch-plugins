@@ -1,0 +1,3 @@
+# no sudo needed
+fsep_oneclick
+dnb_setup

@@ -12,3 +12,6 @@ GIMP 3 (3.0 / 3.2) 人像精修 Python 插件集，跨 Linux / Windows。
 
 ## License
 MIT
+
+## dnb_setup
+One-click Dodge & Burn setup — see dnb_setup/README.md

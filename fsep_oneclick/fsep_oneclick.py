@@ -46,9 +46,9 @@ def _blur(image, drawable, radius):
     drawable.update(0, 0, drawable.get_width(), drawable.get_height())
 
 def default_radius(image):
-    # ~4 px at 2000 px short side, scaled, clamped 2..30
-    s = min(image.get_width(), image.get_height())
-    return max(2.0, min(30.0, round(4.0 * s / 2000.0, 1)))
+    # radius = 6 px * long_side / 4000, clamped 2..30  (4608 px -> 6.9 px)
+    s = max(image.get_width(), image.get_height())
+    return max(2.0, min(30.0, round(6.0 * s / 4000.0, 1)))
 
 def separate(image, layer, radius):
     image.undo_group_start()
@@ -74,6 +74,14 @@ def separate(image, layer, radius):
         ext.set_mode(Gimp.LayerMode.GRAIN_EXTRACT)
         high = image.merge_down(ext, Gimp.MergeType.EXPAND_AS_NECESSARY)
         high.set_name("High (高频)")
+        # merge_down adds alpha; keep High/Low channel layout identical to the
+        # source (Resynthesizer heal-selection etc. need matching channels)
+        if not layer.has_alpha() and high.has_alpha():
+            high.flatten()
+        if layer.has_alpha() and not high.has_alpha():
+            high.add_alpha()
+        if high.has_alpha() != low.has_alpha():
+            raise RuntimeError("High/Low alpha mismatch / 高低频通道不一致")
         layer.set_visible(False)
         high.set_mode(Gimp.LayerMode.GRAIN_MERGE)
         image.set_selected_layers([high])
@@ -101,6 +109,9 @@ def run(procedure, run_mode, image, drawables, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
 
 class FSep(Gimp.PlugIn):
+    def do_set_i18n(self, name):
+        return False          # no gettext catalog; labels are bilingual inline
+
     def do_query_procedures(self):
         return [PROC]
     def do_create_procedure(self, name):
@@ -110,9 +121,9 @@ class FSep(Gimp.PlugIn):
         p.set_menu_label("一键频率分离 / One-click Frequency Separation")
         p.add_menu_path("<Image>/Filters/修图工具/")
         p.set_documentation("Split layer into Low (blur) and High (grain-merge texture) layers in a group. 将图层分离为低频与高频。",
-                            "Original layer is hidden and kept untouched below the group. Radius 0 = auto (~4px per 2000px).", name)
+                            "Original layer is hidden and kept untouched below the group. Radius 0 = auto: 6 px * long side / 4000, clamped 2..30.", name)
         p.set_attribution("Elysia", "Elysia", "2026")
-        p.add_double_argument("radius", "Blur radius / 模糊半径 (0=auto)", "Low-frequency gaussian radius in px",
+        p.add_double_argument("radius", "Blur radius / 模糊半径 (0=auto: 6*long/4000)", "Low-frequency gaussian radius in px",
                               0.0, 200.0, 0.0, GObject.ParamFlags.READWRITE)
         return p
 

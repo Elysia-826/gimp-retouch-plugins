@@ -11,5 +11,5 @@ for f in sorted(os.listdir(outd)):
     print("%-22s %-5s %4dx%-4d %-5s icc=%-28s exif_make=%s" % (f, im.format, im.width, im.height, im.mode, desc[:28], make))
 if len(sys.argv) > 3:
     ref = np.asarray(Image.open(sys.argv[3]).convert("RGB"), int)
-    out = np.asarray(Image.open(os.path.join(outd, "retouch_web.png")).convert("RGB"), int)
+    out = np.asarray(Image.open(os.path.join(outd, "retouch_xcf_web.png")).convert("RGB"), int)
     d = abs(ref - out); print("XCF composite vs GIMP flatten: max", d.max(), "mean", round(d.mean(), 3))

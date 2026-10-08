@@ -103,9 +103,17 @@ PhotoGIMP 只在显式选择时安装，会覆盖配置。它从压缩包中优�
 `language`（PhotoGIMP 自带 `(language "")` 会把中文界面改回系统语言）、`theme`、`icon-theme`、`prefer-dark-theme`、`theme-color-scheme`、`font-relative-size`、`override-theme-icon-size`、`custom-icon-size`、`icon-size`、`import-raw-plug-in`（PhotoGIMP 会把 RAW 导入改成占位插件）；
 原来没设置的这些键会去掉 PhotoGIMP 的值（回到 GIMP 默认）。列表可在 `bundle.lock` 的 params 里用 `preserve=` 覆盖。`--uninstall photogimp --gimp <版本>` 用专用备份精确还原整个配置目录——安装 PhotoGIMP 之后对该配置做的其他改动也会被还原（还原前状态另有备份）。
 
-Windows：`powershell -ExecutionPolicy Bypass -File install.ps1 [-Gimp 3.0|3.2|all] [-Only ours] [-BackupDir D:\gimp-bundle-backups] [-Reinstall] [-DryRun]`
-（已在 Windows 11 + GIMP 3.2.6 上实测安装和无界面注册/运行，插件对话框尚未人工验证；只自动安装本仓库插件，第三方插件按输出的固定版本手动安装）。
-`-Gimp all` 只装到已有配置目录的版本；刚装好、还没启动过的 GIMP 请写明 `-Gimp 3.2`。
+Windows（自选组件，和 Linux 一样不会一键全装）：
+```
+powershell -ExecutionPolicy Bypass -File install.ps1 -List
+powershell -ExecutionPolicy Bypass -File install.ps1 -Components fsep_oneclick,gmic,resynthesizer -Gimp 3.2 -BackupDir D:\gimp-bundle-backups [-CacheDir <目录>] [-Reinstall] [-DryRun]
+```
+- 可选组件：`fsep_oneclick` `dnb_setup` `batch_export`（本仓库）、`gmic` 4.0.5（gmic.eu 官方 GIMP 3.2 版）、`resynthesizer` 3.0.1、`batcher` 1.2.10、`adjustment-layer` cc07757、`photogimp` eca3a8f（必须写明才会装）。`-Only ours|third-party|all` 是快捷组合，不含 photogimp。
+- 全部装进 `%APPDATA%\GIMP\<版本>\`，不需要管理员权限。下载文件都按 sha256 校验；`-CacheDir` 里已有且校验通过的文件不会重新下载。GitHub 连不上时，可以自己把文件下载到这个目录再运行。
+- **resynthesizer 在 Windows 上用的是社区编译版**（ravik453/resynthesizer-windows-build），官方没有 Windows 版。其中的 .scm 与官方 v3.0.1 一致，只有 resynthesizer.exe 是第三方编译的。G'MIC 和 resynthesizer 只提供 GIMP 3.2 版。
+- photogimp 会覆盖布局、快捷键和工具预设。gimprc 里的语言、主题、图标、RAW 导入设置会保留（规则与 Linux 相同）。安装前会另做一份专用备份 `photogimp-pre-*.zip`。GIMP 正在运行时拒绝安装（退出码 75）。
+- 已在 Windows 11 + GIMP 3.2.6 上实测安装和无界面注册/运行，插件对话框尚未人工验证。目前还没有卸载功能，要还原请用备份 zip。
+- `-Gimp all` 只装到已有配置目录的版本；刚装好、还没启动过的 GIMP 请写明 `-Gimp 3.2`。
 
 ### 组件（`components.txt`，`./install.sh --list`）
 | 组件 | 类别 | requires / recommends | 说明 |

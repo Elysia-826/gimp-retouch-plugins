@@ -47,6 +47,67 @@ def _note_recorded(procedure, args, image=None, layer=None):
 
 
 
+# Groups that 一键频率分离 (fsep_oneclick) and 一键加深减淡搭建 (dnb_setup) create,
+# by the exact names those plug-ins assign. Every layer they add (Low/High,
+# the gray 加深减淡 D&B layer, the helper group) sits inside one of these.
+GENERATED_GROUPS = ("Frequency Separation", "Dodge & Burn")
+
+
+def _parent_of(item):
+    try:
+        return item.get_parent()
+    except Exception:
+        return None
+
+
+def _outermost_generated(layer):
+    found = None
+    cur = layer
+    guard = 0
+    while cur is not None and guard < 40:
+        guard += 1
+        try:
+            if cur.is_group() and cur.get_name() in GENERATED_GROUPS:
+                found = cur
+        except Exception:
+            break
+        cur = _parent_of(cur)
+    return found
+
+
+def photo_layer_for(image, layer):
+    """The layer subject select should read.
+
+    A helper layer from frequency separation or dodge-and-burn is replaced by
+    the photo those plug-ins were run on: walking down from the outermost
+    generated group, the first sibling that is a plain pixel layer and not
+    another generated group. fsep puts its group directly above the photo and
+    hides the photo; dnb puts its group above the layer it was run on (or at
+    the top, then below come the frequency group and the photo).
+    Returns (layer, replaced). If no photo layer is found, the layer passed in
+    is returned unchanged, and the usual error follows if it has no subject.
+    """
+    group = _outermost_generated(layer)
+    if group is None:
+        return layer, False
+    parent = _parent_of(group)
+    try:
+        siblings = list(parent.get_children()) if parent is not None else list(image.get_layers())
+        index = siblings.index(group)
+    except Exception:
+        return layer, False
+    for item in siblings[index + 1:]:
+        try:
+            if item.is_group():
+                if item.get_name() in GENERATED_GROUPS:
+                    continue
+                break
+            return item, True
+        except Exception:
+            break
+    return layer, False
+
+
 def _bytes(data):
     if data is None:
         return b""
@@ -253,8 +314,11 @@ def run(procedure, run_mode, image, drawables, config, data):
     try:
         mi = config.get_choice_id("mode")
         mode = "skin" if mi == 1 else "subject"
-        apply_selection(image, drawables[0], mode, config.get_property("feather"))
-        _note_recorded(PROC, {"mode": mode, "feather": float(config.get_property("feather"))}, image, drawables[0])
+        # Before any work: a frequency-separation or dodge-and-burn helper
+        # layer is never the photo. Read and record the photo underneath.
+        target, _replaced = photo_layer_for(image, drawables[0])
+        apply_selection(image, target, mode, config.get_property("feather"))
+        _note_recorded(PROC, {"mode": mode, "feather": float(config.get_property("feather"))}, image, target)
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)

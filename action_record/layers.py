@@ -3,7 +3,6 @@
 # layer inside a group after a restart, including one that is hidden.
 
 GENERATED_GROUPS = ("Frequency Separation", "Dodge & Burn")
-HELPER_LAYER_NAMES = ("加深减淡 D&B",)
 SUBJECT_PROC = "python-fu-subject-select"
 
 
@@ -36,16 +35,19 @@ def _ancestor_names(layer):
 
 
 def inside_generated(layer):
-    """True for the dodge-and-burn paint layer and anything inside the groups
-    frequency separation or dodge-and-burn create."""
-    try:
-        if layer.get_name() in HELPER_LAYER_NAMES:
-            return True
-        if layer.is_group() and layer.get_name() in GENERATED_GROUPS:
-            return True
-    except Exception:
-        return False
-    return any(name in GENERATED_GROUPS for name in _ancestor_names(layer))
+    """True for any layer inside, or equal to, a group that frequency
+    separation or dodge-and-burn creates (names those plug-ins assign)."""
+    cur = layer
+    guard = 0
+    while cur is not None and guard < 40:
+        guard += 1
+        try:
+            if cur.is_group() and cur.get_name() in GENERATED_GROUPS:
+                return True
+        except Exception:
+            return False
+        cur = _parent(cur)
+    return False
 
 
 def layer_ref(image, layer):
@@ -64,46 +66,71 @@ def layer_ref(image, layer):
         chain.append({"name": name, "index": index})
         cur = _parent(cur)
     chain.reverse()
-    return {"name": layer.get_name(), "path": chain}
+    ref = {"name": layer.get_name(), "path": chain}
+    if _is_base(image, layer):
+        # The bottom photo layer is named by the locale (Background / 背景),
+        # so playback finds it by this role when the name does not match.
+        ref["role"] = "base"
+    return ref
+
+
+def _is_base(image, layer):
+    try:
+        if _parent(layer) is not None or layer.is_group():
+            return False
+        roots = list(image.get_layers())
+        return bool(roots) and roots[-1] == layer
+    except Exception:
+        return False
+
+
+def _base_layer(image):
+    try:
+        roots = list(image.get_layers())
+    except Exception:
+        return None
+    if not roots:
+        return None
+    last = roots[-1]
+    try:
+        if last.is_group():
+            return None
+    except Exception:
+        return None
+    return last
 
 
 def _photo_source(image, active):
-    """The pixel layer frequency separation hid: the non-group sibling just
-    under that group. Not a color or a coordinate, so it is not this photo."""
+    """Same rule as subject select: below the outermost generated group, the
+    first sibling that is a plain pixel layer and not another generated group."""
     group = None
-    parent = _parent(active)
-    while parent is not None:
-        if parent.get_name() == "Frequency Separation":
-            group = parent
-            break
-        parent = _parent(parent)
-    if group is not None:
-        siblings = _siblings(image, group)
+    cur = active
+    guard = 0
+    while cur is not None and guard < 40:
+        guard += 1
         try:
-            index = siblings.index(group)
-        except ValueError:
-            index = -1
-        if 0 <= index + 1 < len(siblings):
-            sibling = siblings[index + 1]
-            if not sibling.is_group() and not inside_generated(sibling):
-                return sibling
-    outside = []
-
-    def walk(layers):
-        for item in layers:
+            if cur.is_group() and cur.get_name() in GENERATED_GROUPS:
+                group = cur
+        except Exception:
+            break
+        cur = _parent(cur)
+    if group is None:
+        return None
+    siblings = _siblings(image, group)
+    try:
+        index = siblings.index(group)
+    except ValueError:
+        return None
+    for item in siblings[index + 1:]:
+        try:
             if item.is_group():
-                if item.get_name() not in GENERATED_GROUPS:
-                    walk(list(item.get_children()))
-            elif not inside_generated(item):
-                outside.append(item)
-
-    walk(list(image.get_layers()))
-    if len(outside) == 1:
-        return outside[0]
-    hidden = [item for item in outside if not item.get_visible()]
-    if len(hidden) == 1:
-        return hidden[0]
-    return outside[0] if outside else None
+                if item.get_name() in GENERATED_GROUPS:
+                    continue
+                return None
+            return item
+        except Exception:
+            return None
+    return None
 
 
 def record_target(image, layer, procedure):
@@ -115,24 +142,41 @@ def record_target(image, layer, procedure):
     return layer_ref(image, target)
 
 
-def find_layer(image, ref):
-    path = (ref or {}).get("path") or []
-    if not path:
-        return None
+BASE_NAMES = ("Background", "背景")
+
+
+def _find_by_path(image, path):
     layers = list(image.get_layers())
     found = None
-    for part in path:
+    for pos, part in enumerate(path):
         name = part.get("name")
         index = int(part.get("index") or 0)
         matches = [item for item in layers if item.get_name() == name]
         if index < 0 or index >= len(matches):
             return None
         found = matches[index]
-        if part is not path[-1]:
+        if pos < len(path) - 1:
             if not found.is_group():
                 return None
             layers = list(found.get_children())
     return found
+
+
+def find_layer(image, ref):
+    path = (ref or {}).get("path") or []
+    if not path:
+        return None
+    found = _find_by_path(image, path)
+    if found is not None:
+        return found
+    # The bottom photo layer: GIMP names it by locale (Background in one
+    # setup, 背景 in another). Match it by role, never by guessing a layer.
+    is_base = (ref or {}).get("role") == "base"
+    if not is_base and len(path) == 1 and path[0].get("name") in BASE_NAMES:
+        is_base = True
+    if is_base:
+        return _base_layer(image)
+    return None
 
 
 def layer_label(ref):

@@ -17,3 +17,5 @@ Tests: test_dnb.py (env DNB_IN, DNB_OUT, HELPER=1).
 Localization: `set_i18n` returns False, so there's no missing-catalog warning.
 - Running it again when a `Dodge & Burn` group already exists doesn't create a duplicate. It selects the existing D&B layer, resets FG/BG and returns SUCCESS with a message.
 - On grayscale images the desaturate step is skipped (it's already gray).
+
+涂这一层灰时，用「轻柔涂抹」（`dnb_flow`）而不是把流量、不透明度和笔压乘在一起。见 `dnb_flow/README.md`。尚未人工验证。

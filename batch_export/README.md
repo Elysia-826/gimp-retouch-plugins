@@ -17,7 +17,8 @@ convert to sRGB if the embedded profile isn't sRGB → resize long side → unsh
 | `naming` (`BE_NAMING`) | `always` | `always`: `<stem>_<ext><suffix>.<fmt>` e.g. `a.jpg` → `a_jpg_web.jpg`, so `a.jpg` + `a.png` never collide. `on-collision`: `a_web.jpg`, and the extension is only added when two inputs (or an input file itself) would get the same name |
 | `suffix` | `_web` | |
 | `overwrite` | off | **pre-existing** outputs (there before the run started) are skipped unless this is on. Files written earlier in the same run never block each other (names are planned up front; true duplicates get `_2`, `_3`) |
-| `long-side` | 0 | px, 0 = keep; LoHalo for downscale, cubic for upscale |
+| `long-side` | 0 | px, 0 = keep. Only **shrinks**: images whose long side is already ≤ this keep their size (LoHalo downscale) |
+| `upscale` (`BE_UPSCALE`) | off | on: also enlarge smaller images to `long-side` (cubic). Off since this change; earlier versions always enlarged |
 | `usm-amount` / `usm-radius` | 0.3 / 0.8 | gentle GEGL `gegl:unsharp-mask` (keeps skin texture); amount 0 = off |
 | `jpeg-quality` / `webp-quality` | 92 / 90 | JPEG progressive + optimized; WebP lossy |
 | `bit-depth` (`BE_BIT_DEPTH`) | `keep` | `keep` or `8`: converts 16/32-bit images to 8-bit for PNG/WebP. JPEG and WebP files are 8-bit anyway, so this mainly affects PNG |
@@ -40,6 +41,7 @@ Safety and errors:
 - Each file is handled on its own. Failures are logged and the batch continues. Log: stderr lines `[batch-export] ...` and `<output>/batch_export.log`.
 - Returns **EXECUTION_ERROR** if there are no input files, or if every input failed. Skips don't count as failures.
 - PNG/WebP keep alpha only if the source (bottom layer) has alpha. Otherwise, and always for JPEG, the image is flattened onto white.
+- Behaviour change (Oct 2026): `long-side` no longer enlarges small images by default — set `upscale` / `BE_UPSCALE=1` to get the old behaviour.
 - Breaking change vs the first version: the default output name now includes the source extension (`a_jpg_web.jpg`). Use `naming=on-collision` for the old `a_web.jpg` style.
 
 ## Headless CLI (for bots)

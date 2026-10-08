@@ -128,7 +128,7 @@ def _process_one(path, out_paths, o):
         # resize long side
         ls = o["long_side"]
         w, h = image.get_width(), image.get_height()
-        if ls > 0 and max(w, h) != ls:
+        if ls > 0 and max(w, h) != ls and (max(w, h) > ls or o.get("upscale")):
             k = ls / float(max(w, h))
             Gimp.context_set_interpolation(Gimp.InterpolationType.LOHALO if k < 1 else Gimp.InterpolationType.CUBIC)
             image.scale(max(1, round(w * k)), max(1, round(h * k)))
@@ -288,7 +288,7 @@ def _opts(config):
         f = g(name); return f.get_path() if f is not None and f.get_path() else ""
     return dict(indir=path("input-folder"), outdir=path("output-folder"), file_list=path("file-list"),
                 recursive=g("recursive"), naming=g("naming"), formats=g("formats"),
-                long_side=g("long-side"), usm_amount=g("usm-amount"), usm_radius=g("usm-radius"),
+                long_side=g("long-side"), upscale=g("upscale"), usm_amount=g("usm-amount"), usm_radius=g("usm-radius"),
                 jpeg_q=g("jpeg-quality"), webp_q=g("webp-quality"),
                 wm_text=g("watermark-text") if g("watermark") else "", wm_logo=path("watermark-logo"),
                 wm_opacity=g("watermark-opacity"), wm_font=g("watermark-font"), wm_size=g("watermark-size"),
@@ -365,7 +365,8 @@ class BatchExport(Gimp.PlugIn):
         p.add_choice_argument("naming", "Naming / 命名", None, nm, "always", F)
         p.add_string_argument("suffix", "Filename suffix / 文件名后缀", None, "_web", F)
         p.add_boolean_argument("overwrite", "Overwrite pre-existing outputs / 覆盖已有输出", None, False, F)
-        p.add_int_argument("long-side", "Long side px / 长边 (0=keep)", None, 0, 30000, 0, F)
+        p.add_int_argument("long-side", "Long side px / 长边 (0=keep)", "Only shrinks larger images unless 'upscale' is on", 0, 30000, 0, F)
+        p.add_boolean_argument("upscale", "Enlarge smaller images / 放大较小图片", "Off: images smaller than long-side keep their size", False, F)
         p.add_double_argument("usm-amount", "Sharpen amount / 锐化量 (0=off)", "Unsharp mask scale", 0.0, 5.0, 0.3, F)
         p.add_double_argument("usm-radius", "Sharpen radius / 锐化半径", "Unsharp mask std-dev px", 0.0, 10.0, 0.8, F)
         p.add_int_argument("jpeg-quality", "JPEG quality / 质量", None, 1, 100, 92, F)

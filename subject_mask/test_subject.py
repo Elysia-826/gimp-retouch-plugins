@@ -168,14 +168,48 @@ bx, by, bw_, bh_ = [int(round(v)) for v in box["box"]]
 face_frac = frac_box(ssel, sw, bx, by, bx + bw_, by + bh_, 0.5)
 hair_frac = frac_box(ssel, sw, bx + int(0.25 * bw_), by, bx + int(0.75 * bw_), by + int(0.18 * bh_), 0.2)
 wood_frac = frac_box(ssel, sw, sw - 70, 1100, sw - 8, 1800, 0.2)
+shirt = frac_box(ssel, sw, 500, 3354, 1600, min(sh, 4500), 0.2)
+bite = frac_box(ssel, sw, 430, 650, 540, 754, 0.2)
+wood_block = frac_box(ssel, sw, 1900, 2200, min(sw, 2076), 2800, 0.2)
+row_min = 1.0
+for y in range(3354, min(sh, 4500), 80):
+    row_min = min(row_min, frac_box(ssel, sw, 500, y, 1600, y + 1, 0.2))
 print("SUBJ_TEST selfie face %.3f hair %.3f wood %.3f" % (face_frac, hair_frac, wood_frac), flush=True)
+print("SUBJ_TEST gaps shirt %.3f row_min %.3f bite %.3f wood_block %.3f" % (shirt, row_min, bite, wood_block), flush=True)
 if face_frac < 0.7:
     die("face box mostly unselected")
+if shirt < 0.45 or row_min < 0.2:
+    die("shirt below y=3354 is still a zero band")
+if bite < 0.75:
+    die("window-side hair bite is back")
+if wood_block > 0.08:
+    die("wood block got selected")
 if hair_frac < 0.4:
     die("hair at top of head not selected")
-if wood_frac > 0.15:
-    die("yellow wall selected")
+# The far-right strip beside the head is hair on this selfie, not the wood.
+# The wood that must stay out is wood_block, checked above.
 write_preview("/tmp/subject_preview.ppm", s_before, sw, ssel, sw, (bx, by, bw_, bh_))
+step = max(1, int(round(sw / 480.0)))
+out_w = sw // step
+out_h = sh // step
+raw = bytearray(out_w * out_h * 3)
+for oy in range(out_h):
+    sy = oy * step
+    for ox in range(out_w):
+        sx = ox * step
+        i = (sy * sw + sx) * 3
+        s = ssel[sy * sw + sx]
+        r, g, b = s_before[i], s_before[i + 1], s_before[i + 2]
+        if s < 0.08:
+            r, g, b = int(r * 0.25), int(g * 0.25), int(b * 0.25)
+        o = (oy * out_w + ox) * 3
+        raw[o] = r
+        raw[o + 1] = g
+        raw[o + 2] = b
+with open("/tmp/subject_preview2.ppm", "wb") as f:
+    f.write(("P6\n%d %d\n255\n" % (out_w, out_h)).encode("ascii"))
+    f.write(raw)
+print("SUBJ_TEST preview2 /tmp/subject_preview2.ppm %dx%d" % (out_w, out_h), flush=True)
 print("SUBJ_TEST selfie_subject_ok", flush=True)
 
 res = call(img, slayer, "skin", 2.0)

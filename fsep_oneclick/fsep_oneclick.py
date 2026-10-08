@@ -1,13 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # One-click Frequency Separation / 一键频率分离  (GIMP 3.0.x and 3.2.x)
-import sys, gi
+import os, sys, gi
 gi.require_version('Gimp', '3.0')
 gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
 PROC = "python-fu-fsep-oneclick"
+
+def _note_recorded(procedure, args):
+    """If 动作录制 is recording, append this call. Missing recorder = do nothing."""
+    try:
+        import importlib.util
+        path = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "action_record", "store.py"))
+        if not os.path.isfile(path):
+            return
+        spec = importlib.util.spec_from_file_location("retouch_action_store", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        gdir = Gimp.directory() if hasattr(Gimp, "directory") else ""
+        mod.note_step(gdir or "", procedure, args)
+    except Exception:
+        return
+
+
 
 def _blur(image, drawable, radius):
     pdb = Gimp.get_pdb()
@@ -104,6 +122,7 @@ def run(procedure, run_mode, image, drawables, config, data):
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, None)
     try:
         separate(image, drawables[0], config.get_property("radius"))
+        _note_recorded(PROC, {"radius": float(config.get_property("radius"))})
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)

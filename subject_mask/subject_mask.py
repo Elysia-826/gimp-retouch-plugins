@@ -19,6 +19,24 @@ from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
 PROC = "python-fu-subject-select"
 
+def _note_recorded(procedure, args):
+    """If 动作录制 is recording, append this call. Missing recorder = do nothing."""
+    try:
+        import importlib.util
+        path = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "action_record", "store.py"))
+        if not os.path.isfile(path):
+            return
+        spec = importlib.util.spec_from_file_location("retouch_action_store", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        gdir = Gimp.directory() if hasattr(Gimp, "directory") else ""
+        mod.note_step(gdir or "", procedure, args)
+    except Exception:
+        return
+
+
+
 
 def _bytes(data):
     if data is None:
@@ -227,6 +245,7 @@ def run(procedure, run_mode, image, drawables, config, data):
         mi = config.get_choice_id("mode")
         mode = "skin" if mi == 1 else "subject"
         apply_selection(image, drawables[0], mode, config.get_property("feather"))
+        _note_recorded(PROC, {"mode": mode, "feather": float(config.get_property("feather"))})
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)

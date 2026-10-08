@@ -11,6 +11,7 @@ GIMP 3 (3.0 / 3.2) Python 插件集，跨 Linux / Windows。
 - `spot_heal` — 点修复（尚未人工验证）：填一个点的坐标，用周围纹理补掉小斑。细线会留着，点在细线上且没有更大的斑就不涂。详见 `spot_heal/README.md`
 - `dnb_flow` — 轻柔涂抹（尚未人工验证）：在 50% 灰柔光层上走笔。流量决定这一笔叠多快，不透明度是上限，读不到笔压。详见 `dnb_flow/README.md`
 - `subject_mask` — 选出主体（尚未人工验证）：把人或脸部皮肤做成选区，边缘略虚。不是发丝抠图。皮肤模式会躲开眼睛和嘴。详见 `subject_mask/README.md`
+- `action_record` — 动作录制（尚未人工验证）：开始录制、停止录制、播放动作。只记下带参数的一键频率分离、加深减淡搭建和选出主体。手绘、液化笔触和点修复单击不录，因为它们要画布上的一个点。内置「自然修图准备」不用先录。详见 `action_record/README.md`
 
 ## 可选安装 / 一键重装（尚未人工验证）
 Linux（GIMP 3.0 apt + GIMP 3.2 Flatpak --user）。逻辑在 `installer/bundle.py`（`install.sh` 只是入口，需要 python3）；
@@ -51,7 +52,7 @@ Linux（GIMP 3.0 apt + GIMP 3.2 Flatpak --user）。逻辑在 `installer/bundle.
 | 预设 | 组件 | 说明 |
 |---|---|---|
 | `minimal` | fsep_oneclick, dnb_setup | 不需要 sudo |
-| `portrait` | minimal + resynthesizer, adjustment-layer, batch_export, mesh_liquify, spot_heal, dnb_flow, subject_mask | 人像修图常用 |
+| `portrait` | minimal + resynthesizer, adjustment-layer, batch_export, mesh_liquify, spot_heal, dnb_flow, subject_mask, action_record | 人像修图常用 |
 | `full` | 除 photogimp 外全部 | 需显式选择（不再是默认值） |
 
 选择规则：
@@ -112,7 +113,7 @@ Windows（自选组件，和 Linux 一样不会一键全装）：
 powershell -ExecutionPolicy Bypass -File install.ps1 -List
 powershell -ExecutionPolicy Bypass -File install.ps1 -Components fsep_oneclick,gmic,resynthesizer -Gimp 3.2 -BackupDir D:\gimp-bundle-backups [-CacheDir <目录>] [-Reinstall] [-DryRun]
 ```
-- 可选组件：`fsep_oneclick` `dnb_setup` `batch_export` `mesh_liquify` `spot_heal` `dnb_flow` `subject_mask`（本仓库）、`gmic` 4.0.5（gmic.eu 官方 GIMP 3.2 版）、`resynthesizer` 3.0.1、`batcher` 1.2.10、`adjustment-layer` cc07757、`photogimp` eca3a8f（必须写明才会装）。`-Only ours|third-party|all` 是快捷组合，不含 photogimp。
+- 可选组件：`fsep_oneclick` `dnb_setup` `batch_export` `mesh_liquify` `spot_heal` `dnb_flow` `subject_mask` `action_record`（本仓库）、`gmic` 4.0.5（gmic.eu 官方 GIMP 3.2 版）、`resynthesizer` 3.0.1、`batcher` 1.2.10、`adjustment-layer` cc07757、`photogimp` eca3a8f（必须写明才会装）。`-Only ours|third-party|all` 是快捷组合，不含 photogimp。
 - 全部装进 `%APPDATA%\GIMP\<版本>\`，不需要管理员权限。下载文件都按 sha256 校验；`-CacheDir` 里已有且校验通过的文件不会重新下载。GitHub 连不上时，可以自己把文件下载到这个目录再运行。
 - **resynthesizer 在 Windows 上用的是社区编译版**（ravik453/resynthesizer-windows-build），官方没有 Windows 版。其中的 .scm 与官方 v3.0.1 一致，只有 resynthesizer.exe 是第三方编译的。G'MIC 和 resynthesizer 只提供 GIMP 3.2 版。
 - photogimp 会覆盖布局、快捷键和工具预设。gimprc 里的语言、主题、图标、RAW 导入设置会保留（规则与 Linux 相同）。安装前会另做一份专用备份 `photogimp-pre-*.zip`。GIMP 正在运行时拒绝安装（退出码 75）。
@@ -129,6 +130,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Components fsep_oneclick,g
 | spot_heal | ours | resynthesizer | 点修复小斑，细线不涂（尚未人工验证） |
 | dnb_flow | ours | – | 轻柔加深减淡笔触，流量和不透明度分开（尚未人工验证） |
 | subject_mask | ours | mesh_liquify | 选出主体或脸部皮肤，边缘略虚，不是发丝抠图（尚未人工验证） |
+| action_record | ours | – / fsep_oneclick, dnb_setup, subject_mask | 录下并重放频率分离、加深减淡搭建、选出主体（尚未人工验证） |
 | raw2tiff | ours | rawtherapee / batch_export | RAW→16 位 TIFF，`~/.local/bin/raw2tiff` |
 | gmic | third-party | – | G'MIC-Qt |
 | resynthesizer | third-party | – | 修复选区/纹理合成 |
@@ -140,7 +142,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Components fsep_oneclick,g
 ### 构建与固定版本（`bundle.lock`）
 | 组件 | GIMP 3.0 (apt) | GIMP 3.2 (Flatpak) | 来源 | 许可 |
 |---|---|---|---|---|
-| fsep_oneclick / dnb_setup / batch_export / mesh_liquify / spot_heal / dnb_flow / subject_mask | 本仓库 | 本仓库 | — | MIT |
+| fsep_oneclick / dnb_setup / batch_export / mesh_liquify / spot_heal / dnb_flow / subject_mask / action_record | 本仓库 | 本仓库 | — | MIT |
 | G'MIC-Qt | 4.0.5 .deb (sha256 固定) | Flathub 扩展 4.0.5 (commit 15f4bea) + `gmic_qt_icu77` 包装 (ICU 77 来自 org.freedesktop.Platform 25.08, commit d27f7a6) | gmic.eu / Flathub | CeCILL-2.1 / GPL-3.0 |
 | Resynthesizer | v3.0 源码编译 (commit 3846f79；**不要用 v3.0.1**) | Flathub 扩展 3.0.1 (commit f14825c) | github.com/bootchk/resynthesizer | GPL-3.0 |
 | Batcher | 1.2.10 zip (sha256) | 1.2.10 zip (sha256) | github.com/kamilburda/batcher | BSD-3-Clause |

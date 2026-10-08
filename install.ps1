@@ -35,6 +35,7 @@ $C = [ordered]@{
   "spot_heal"       = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("spot_heal\spot_heal.py"); procs=@("python-fu-spot-heal") }
   "dnb_flow"        = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("dnb_flow\dnb_flow.py"); procs=@("python-fu-dnb-flow") }
   "subject_mask"    = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("subject_mask\subject_mask.py","subject_mask\subject_select.py"); procs=@("python-fu-subject-select") }
+  "action_record"   = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("action_record\action_record.py","action_record\store.py"); procs=@("python-fu-action-record-start","python-fu-action-record-stop","python-fu-action-play") }
   "gmic"            = @{ kind="zip"; gimp="3.2"; ver="4.0.5"; file="gmic_4.0.5_gimp3.2_win64.zip"
                          url="https://gmic.eu/files/windows/gmic_4.0.5_gimp3.2_win64.zip"
                          sha="739bc467de3f6e61f85d827f5444339268145f4b3aaddbdb834b1e3b2ce7a950"; dirs=@("gmic_gimp_qt"); procs=@("plug-in-gmic-qt")
@@ -55,7 +56,7 @@ $C = [ordered]@{
                          sha="beab281ed1281219bb0b994df4e66e8ff107e54dad943644d077205a325c7d99"; procs=@()
                          note="opt-in; overwrites layout/shortcuts/tool presets; keeps gimprc keys: language, theme, icons, import-raw-plug-in" }
 }
-$Sets = @{ "ours"=@("fsep_oneclick","dnb_setup","batch_export","mesh_liquify","spot_heal","dnb_flow","subject_mask"); "third-party"=@("gmic","resynthesizer","batcher","adjustment-layer") }
+$Sets = @{ "ours"=@("fsep_oneclick","dnb_setup","batch_export","mesh_liquify","spot_heal","dnb_flow","subject_mask","action_record"); "third-party"=@("gmic","resynthesizer","batcher","adjustment-layer") }
 $Sets["all"] = $Sets["ours"] + $Sets["third-party"]
 
 if ($List) {

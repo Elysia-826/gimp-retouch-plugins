@@ -204,7 +204,7 @@ def check(b, g, record):
         bad = ["%s=%s" % (n, cur) for n, (cur, want) in vs.items() if cur != want]
         return ("mismatch", " ".join(bad)) if bad else ("ok", b["version"])
     if k == "git-meson":
-        exe, chk = p.get("exe"), p.get("check")
+        exe, chk = tpl(p.get("exe") or "", g), tpl(p.get("check") or "", g)
         if not (exe and os.path.exists(exe)): return "absent", ""
         try:
             txt = open(chk, encoding="utf-8", errors="replace").read() if chk else ""
@@ -290,7 +290,11 @@ def describe(b, g, reinstall):
     if k == "ours": return "copy %s -> %s" % (b["source"], tpl(b["dest"], g)), False
     if k == "deb": return "download %s (sha256 %s…) ; sudo apt-get install %s./deb" % (b["source"], b["pin"][:12], "--reinstall " if reinstall else ""), True
     if k == "apt": return "sudo apt-get install -y %s%s" % ("--reinstall " if reinstall else "", p["pkgs"]), True
-    if k == "git-meson": return "sudo apt-get install build deps (%s); git clone %s @%s; meson build; sudo meson install" % (p.get("builddeps", ""), b["source"], b["pin"][:7]), True
+    if k == "git-meson":
+        if p.get("userdir") == "1":
+            return "sudo apt-get install build deps (%s); git clone %s @%s; meson build; meson install to a staging dir; copy plug-ins -> %s" % (
+                p.get("builddeps", ""), b["source"], b["pin"][:7], tpl(b["dest"], g)), True
+        return "sudo apt-get install build deps (%s); git clone %s @%s; meson build; sudo meson install" % (p.get("builddeps", ""), b["source"], b["pin"][:7]), True
     if k == "zip": return "download %s ; unpack %s -> %s" % (b["source"], p.get("subdir", ""), tpl(b["dest"], g)), False
     if k == "rawfile": return "download %s -> %s" % (b["source"], tpl(b["dest"], g)), False
     if k == "flatpak": return "flatpak install --user flathub %s ; pin commit %s" % (fp_ref(b), b["pin"][:7]), False
@@ -347,6 +351,33 @@ def install(b, g, reinstall, sudo_ok):
         shutil.rmtree(os.path.join(src, "build"), ignore_errors=True)
         sh(["meson", "setup", os.path.join(src, "build"), src] + p.get("meson", "").split(), check=True)
         sh(["ninja", "-C", os.path.join(src, "build")], check=True)
+        if p.get("userdir") == "1":
+            # User plug-ins dir: lives in $HOME, so reinstalling the GIMP
+            # package (which recreates /usr/lib/.../plug-ins) does not drop it.
+            stage = tempfile.mkdtemp(dir=CACHE)
+            try:
+                sh(["meson", "install", "-C", os.path.join(src, "build"), "--no-rebuild", "--destdir", stage], check=True)
+                found = [r for r, ds, fs in os.walk(stage) if r.endswith(os.path.join("gimp", g, "plug-ins"))]
+                if not found:
+                    raise RuntimeError("meson install produced no gimp/%s/plug-ins" % g)
+                dest = tpl(b["dest"], g).rstrip("/")
+                os.makedirs(dest, exist_ok=True)
+                files = []
+                for name in sorted(os.listdir(found[0])):
+                    s_ = os.path.join(found[0], name)
+                    d_ = os.path.join(dest, name)
+                    if not os.path.isdir(s_):
+                        continue
+                    shutil.rmtree(d_, ignore_errors=True)
+                    shutil.copytree(s_, d_)
+                    for root, dirs, fls in os.walk(d_):
+                        for f in fls:
+                            fp = os.path.join(root, f)
+                            os.chmod(fp, 0o755)
+                    files.append(d_ + "/")
+            finally:
+                shutil.rmtree(stage, ignore_errors=True)
+            return dict(method="copy", files=files)
         sh(["sudo", "meson", "install", "-C", os.path.join(src, "build"), "--no-rebuild"], check=True)
         log = os.path.join(src, "build/meson-logs/install-log.txt")
         return dict(method="meson-install", install_log=log, files=_meson_files(log))
@@ -511,6 +542,9 @@ def adopt_info(b, g):
     if k == "deb": return dict(method="deb", package=p["pkg"])
     if k == "apt": return dict(method="apt", packages=p["pkgs"].split())
     if k == "git-meson":
+        if p.get("userdir") == "1":
+            exe, chk = tpl(p.get("exe") or "", g), tpl(p.get("check") or "", g)
+            return dict(method="copy", files=[os.path.dirname(x) + "/" for x in (exe, chk) if x])
         for log in (os.path.join(CACHE, b["build"], "build/meson-logs/install-log.txt"),
                     os.path.join(CACHE, "resynthesizer", "build/meson-logs/install-log.txt")):
             if os.path.exists(log):

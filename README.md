@@ -91,7 +91,7 @@ photogimp = false
   | 方式 | 默认 | 说明 |
   |---|---|---|
   | 复制的文件 / zip / 生成的包装（ours、batcher、adjustment-layer、raw2tiff、gmic_qt_icu77） | 删除 | 先备份；空目录与 `__pycache__` 一并清理 |
-  | meson install-log（3.0 自编译 Resynthesizer） | 删除 | 按记录的 install-log 清单 `sudo rm`；sudo 步骤预先列出 |
+  | 3.0 自编译 Resynthesizer（装在 `~/.config/GIMP/3.0/plug-ins/`） | 删除 | 按记录的目录删除，先备份，不需要 sudo。旧版本用 `sudo meson install` 装进 `/usr/lib/.../gimp/3.0/plug-ins/` 的记录仍按 install-log 清单 `sudo rm` |
   | deb / apt（3.0 G'MIC-Qt .deb、rawtherapee） | **保留** | 只有 `--purge` 才 `sudo apt-get remove` |
   | Flatpak 扩展（3.2 G'MIC、Resynthesizer） | 删除 | `flatpak uninstall --user`，属于用户级 |
   | 共享运行时（`org.freedesktop.Platform 25.08`，lock 里 `shared=1`） | **保留** | 只有 `--purge` 才卸载（其他应用可能在用） |
@@ -144,7 +144,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Components fsep_oneclick,g
 |---|---|---|---|---|
 | fsep_oneclick / dnb_setup / batch_export / mesh_liquify / spot_heal / dnb_flow / subject_mask / action_record | 本仓库 | 本仓库 | — | MIT |
 | G'MIC-Qt | 4.0.5 .deb (sha256 固定) | Flathub 扩展 4.0.5 (commit 15f4bea) + `gmic_qt_icu77` 包装 (ICU 77 来自 org.freedesktop.Platform 25.08, commit d27f7a6) | gmic.eu / Flathub | CeCILL-2.1 / GPL-3.0 |
-| Resynthesizer | v3.0 源码编译 (commit 3846f79；**不要用 v3.0.1**) | Flathub 扩展 3.0.1 (commit f14825c) | github.com/bootchk/resynthesizer | GPL-3.0 |
+| Resynthesizer | v3.0 源码编译 (commit 3846f79；**不要用 v3.0.1**；装到用户 plug-ins 目录，重装 GIMP 软件包不会丢) | Flathub 扩展 3.0.1 (commit f14825c) | github.com/bootchk/resynthesizer | GPL-3.0 |
 | Batcher | 1.2.10 zip (sha256) | 1.2.10 zip (sha256) | github.com/kamilburda/batcher | BSD-3-Clause |
 | adjustment-layer | commit cc07757 (文件 sha256) | 同左 | github.com/bunnywaffle/adjustment-layer | GPL-3.0 |
 | RawTherapee（`--add rawtherapee` / raw2tiff 依赖） | apt 5.11-2+b2（主机级，供 raw2tiff 使用） | 不使用 Flathub 版；3.2 通过 raw2tiff 生成的 TIFF 处理 | Debian trixie | GPL-3.0 |

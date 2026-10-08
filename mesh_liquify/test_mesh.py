@@ -686,4 +686,48 @@ if dr2 != 0 or fzr != 0 or fru.get_visible():
     die("redo second stroke failed")
 imgu.delete()
 
+
+def _dot(buf, w, h, bpp):
+    for y in range(h):
+        for x in range(w):
+            i = (y * w + x) * bpp
+            buf[i:i + 4] = b"\x46\x6e\xa0\xff"
+            if abs(x - 80) <= 2 and abs(y - 50) <= 2:
+                buf[i:i + 4] = b"\xff\x00\x00\xff"
+
+def _run_reverse(flag):
+    img, lay, (w, h, before) = new_image(
+        180, 100, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, _dot)
+    call_named("python-fu-mesh-liquify-stroke-layer", img, lay)
+    st = _stroke_named(img)
+    _paint_bar(st, 20, 140, 48, 52)
+    fr = Gimp.Layer.new(img, "冻结", w, h, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
+    img.insert_layer(fr, None, 0)
+    fr.get_buffer().set(Gegl.Rectangle.new(0, 0, w, h), "R'G'B'A u8", bytes([0, 0, 0, 255]) * (w * h))
+    fr.get_buffer().set(Gegl.Rectangle.new(150, 0, w - 150, h), "R'G'B'A u8", bytes([255, 255, 255, 255]) * ((w - 150) * h))
+    fr.update(0, 0, w, h)
+    Gimp.Selection.none(img)
+    call(img, lay, mode="push", path="layer", reverse=flag,
+         **{"stroke-layer": st, "freeze": "layer", "freeze-layer": fr, "freeze-feather": 8.0},
+         x1=-1.0, y1=-1.0, x2=-1.0, y2=-1.0,
+         radius=20.0, strength=80.0, hardness=0.0, angle=90.0, clockwise=True)
+    _, _, after = pixels(lay, "R'G'B'A u8")
+    c = centroid(after, w, h, 4, lambda raw, i: raw[i] > 200 and raw[i + 1] < 40 and raw[i + 2] < 40)
+    fz, _ = count_diff(before, after, w, h, 4, lambda x, y: x >= 150)
+    img.delete()
+    return c, fz
+
+c_off, fz_off = _run_reverse(False)
+c_on, fz_on = _run_reverse(True)
+print("MESH_TEST stroke_reverse off=%s frozen_off=%d on=%s frozen_on=%d" % (
+    c_off, fz_off, c_on, fz_on), flush=True)
+if c_off is None or c_on is None:
+    die("reverse test lost the marker")
+if c_off[0] <= 84:
+    die("default stroke did not push toward larger x: %s" % (c_off,))
+if c_on[0] >= 76:
+    die("reverse did not push toward smaller x: %s" % (c_on,))
+if fz_off != 0 or fz_on != 0:
+    die("frozen pixels moved reverse off=%d on=%d" % (fz_off, fz_on))
+
 print("MESH_TEST OK", flush=True)

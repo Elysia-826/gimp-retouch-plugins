@@ -716,8 +716,13 @@ def prepare_stroke_layer(image, layer):
     Gimp.displays_flush()
 
 def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise, weights, wx, wy, ww, wh,
-           freeze_src=None, freeze_feather=0.0, layer=None, sample=None, poly=None):
+           freeze_src=None, freeze_feather=0.0, layer=None, sample=None, poly=None, reverse=False):
     """Add one soft brush to the mesh. Returns True if any sample was visited."""
+    # Painted strokes have no pen order. Default is left-to-right (vertical:
+    # top-to-bottom). Reverse flips that tangent so a horizontal line pushes
+    # toward smaller x.
+    if reverse and poly is not None and len(poly) >= 2:
+        poly = list(reversed(poly))
     r = float(radius)
     if r < 1.0:
         raise RuntimeError("radius must be >= 1 / 笔刷半径至少 1")
@@ -792,6 +797,8 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
             rad = math.radians(float(angle))
             dirx, diry = math.cos(rad), math.sin(rad)
             vx = vy = L2 = 0.0
+        if reverse and not use_poly:
+            dirx, diry = -dirx, -diry
     elif mode == "bloat":
         amount = tstr * r * AMOUNT["bloat"]
     elif mode == "pinch":
@@ -937,7 +944,7 @@ def _render(orig, layer, mesh):
     layer.update(0, 0, layer.get_width(), layer.get_height())
 
 def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise,
-            freeze_mode="none", freeze_layer=None, freeze_feather=0.0, stroke_layer=None):
+            freeze_mode="none", freeze_layer=None, freeze_feather=0.0, stroke_layer=None, reverse=False):
     if layer.is_group() or _pstr(layer, ROLE) == "original":
         raise RuntimeError("Choose a normal paint layer, not the hidden liquify snapshot or a group / 请选择普通图层")
     if layer.get_lock_content():
@@ -986,7 +993,7 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
     sample = orig if orig is not None else layer
     before_blob = _mesh_blob(mesh)
     touched = deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise,
-                     weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample, poly)
+                     weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample, poly, reverse)
     if not touched:
         return
     image.undo_group_start()
@@ -1029,7 +1036,7 @@ def run(procedure, run_mode, image, drawables, config, data):
     if run_mode == Gimp.RunMode.INTERACTIVE:
         GimpUi.init(PROC)
         dlg = GimpUi.ProcedureDialog.new(procedure, config, "柔和液化 / Soft Mesh Liquify")
-        dlg.fill(["mode", "path", "stroke-layer", "radius", "strength", "hardness", "x1", "y1", "x2", "y2", "angle", "clockwise",
+        dlg.fill(["mode", "path", "stroke-layer", "reverse", "radius", "strength", "hardness", "x1", "y1", "x2", "y2", "angle", "clockwise",
                   "freeze", "freeze-layer", "freeze-feather"])
         ok = dlg.run()
         dlg.destroy()
@@ -1049,7 +1056,7 @@ def run(procedure, run_mode, image, drawables, config, data):
                 config.get_property("hardness"), config.get_property("angle"),
                 config.get_property("clockwise"),
                 fr_mode, config.get_property("freeze-layer"), config.get_property("freeze-feather"),
-                stroke)
+                stroke, bool(config.get_property("reverse")))
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
@@ -1204,6 +1211,9 @@ class MeshLiquify(Gimp.PlugIn):
         p.add_drawable_argument("stroke-layer", "Stroke layer / 液化笔触图层",
                                 "The layer you painted. Hidden after this push, not deleted. Direction follows the line from its upper-left end, not the order you painted. 用完会隐藏，不删除。方向从左往右（竖线从上往下），不是落笔先后。",
                                 True, F)
+        p.add_boolean_argument("reverse", "Reverse / 反向",
+                               "Off: a painted stroke pushes left to right, or top to bottom if it is taller than it is wide. On: the same stroke pushes the other way (a horizontal line toward smaller x). Does not follow pen order. 不勾：横线从左往右、竖线从上往下。勾上：同一条线反过来推，横线改成往左。",
+                               False, F)
         p.add_double_argument("radius", "Brush radius px / 笔刷半径", "Soft falloff reaches zero at this radius",
                               1.0, 4000.0, 80.0, F)
         p.add_double_argument("strength", "Strength / 强度 (0-100)",

@@ -12,6 +12,7 @@ gi.require_version("GimpUi", "3.0")
 from gi.repository import Gimp, GimpUi, GObject, GLib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import layers
 import store
 
 START = "python-fu-action-record-start"
@@ -74,6 +75,20 @@ def _set_arg(cfg, key, value):
         cfg.set_property(key, value)
 
 
+def _select_target(image, target):
+    """Select the recorded layer. Unhide only when selection itself refuses a
+    hidden layer, and say so by returning True so the caller can hide it again."""
+    try:
+        image.set_selected_layers([target])
+        return False
+    except Exception:
+        if target.get_visible():
+            raise
+    target.set_visible(True)
+    image.set_selected_layers([target])
+    return True
+
+
 def _run_step(image, layer, step):
     name = step.get("procedure")
     if not name:
@@ -81,24 +96,42 @@ def _run_step(image, layer, step):
     proc = Gimp.get_pdb().lookup_procedure(name)
     if proc is None:
         raise RuntimeError("找不到 %s，请先安装对应插件 / Procedure is not installed: %s" % (name, name))
-    target = _active_layer(image, layer)
-    if target is None or not isinstance(target, Gimp.Layer):
-        raise RuntimeError("请选择一个图层再播放 / Select a layer before playing")
-    cfg = proc.create_config()
-    cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
-    cfg.set_property("image", image)
-    _set_drawables(cfg, proc, target)
-    for key, value in (step.get("args") or {}).items():
-        _set_arg(cfg, key, value)
-    res = proc.run(cfg)
-    if not _status_ok(res):
-        detail = ""
-        try:
-            if res.length() > 1 and res.index(1) is not None:
-                detail = " " + str(res.index(1))
-        except Exception:
-            pass
-        raise RuntimeError("播放失败 %s%s / Playback failed" % (name, detail))
+    ref = step.get("layer")
+    unhid = False
+    if ref:
+        target = layers.find_layer(image, ref)
+        if target is None or not isinstance(target, Gimp.Layer):
+            raise RuntimeError(
+                "找不到记录的图层「%s」，这一步没有改到别的图层上。" % layers.layer_label(ref))
+        unhid = _select_target(image, target)
+    else:
+        # Built-in steps have no recorded layer: use whatever is current,
+        # which is how running the two plugins by hand behaves.
+        target = _active_layer(image, layer)
+        if target is None or not isinstance(target, Gimp.Layer):
+            raise RuntimeError("请选择一个图层再播放 / Select a layer before playing")
+    try:
+        cfg = proc.create_config()
+        cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+        cfg.set_property("image", image)
+        _set_drawables(cfg, proc, target)
+        for key, value in (step.get("args") or {}).items():
+            _set_arg(cfg, key, value)
+        res = proc.run(cfg)
+        if not _status_ok(res):
+            detail = ""
+            try:
+                if res.length() > 1 and res.index(1) is not None:
+                    detail = " " + str(res.index(1))
+            except Exception:
+                pass
+            raise RuntimeError("播放失败 %s%s / Playback failed" % (name, detail))
+    finally:
+        if unhid:
+            try:
+                target.set_visible(False)
+            except Exception:
+                pass
     return target
 
 

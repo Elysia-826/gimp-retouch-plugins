@@ -88,8 +88,12 @@ def _clean_args(args):
     return out
 
 
-def note_step(gimp_dir, procedure, args):
-    """Append one step if a recording session is open. Never raises."""
+def note_step(gimp_dir, procedure, args, layer=None):
+    """Append one step if a recording session is open. Never raises.
+
+    layer is the path recorded by layers.record_target, or None for a step
+    that should keep using whatever layer is current (the built-in action).
+    """
     try:
         if not gimp_dir or not procedure:
             return
@@ -100,7 +104,10 @@ def note_step(gimp_dir, procedure, args):
         if not data.get("recording"):
             return
         steps = list(data.get("steps") or [])
-        steps.append({"procedure": str(procedure), "args": _clean_args(args)})
+        step = {"procedure": str(procedure), "args": _clean_args(args)}
+        if isinstance(layer, dict) and layer.get("path"):
+            step["layer"] = layer
+        steps.append(step)
         data["steps"] = steps
         _write(path, data)
     except Exception:

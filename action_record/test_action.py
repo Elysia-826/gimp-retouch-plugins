@@ -229,9 +229,144 @@ def phase_play():
     log("ALL_OK")
 
 
+
+
+SEQ_NAME = "三步对准图层"
+
+
+def _soft(proc_name, image, layer, **kwargs):
+    proc = Gimp.get_pdb().lookup_procedure(proc_name)
+    if proc is None:
+        return "missing"
+    cfg = proc.create_config()
+    cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+    cfg.set_property("image", image)
+    if hasattr(cfg, "set_core_object_array"):
+        cfg.set_core_object_array("drawables", [layer])
+    else:
+        cfg.set_property("drawables", [layer])
+    for key, value in kwargs.items():
+        cfg.set_property(key, value)
+    res = proc.run(cfg)
+    return "ok" if status_ok(res) else "fail %s" % res.index(0)
+
+
+def _selected_name(image):
+    try:
+        layers = image.get_selected_layers()
+    except Exception:
+        return ""
+    if not layers:
+        return ""
+    return layers[0].get_name()
+
+
+def phase_seq():
+    log("--- layer-target record %s dir %s ---" % (Gimp.version(), Gimp.directory()))
+    ensure_copies()
+    img = load(COPIES["record"])
+    photo = img.get_layers()[0]
+    before = layer_bytes(photo)
+    call("python-fu-action-record-start", img, photo)
+    call("python-fu-fsep-oneclick", img, photo, radius=8.0)
+    current = _selected_name(img)
+    log("after-fsep-selected %s" % current)
+    sel = img.get_selected_layers()[0]
+    call("python-fu-dnb-setup", img, sel)
+    gray = img.get_selected_layers()[0]
+    log("after-dnb-selected %s" % gray.get_name())
+    # Subject select is invoked on the original photo, while the current layer
+    # is the gray dodge-and-burn layer the previous step left behind.
+    call("python-fu-subject-select", img, photo, mode="subject", feather=2.0)
+    spot = _soft("python-fu-spot-heal", img, gray, x=8.0, y=8.0, radius=6.0, x2=-1.0, y2=-1.0, x3=-1.0, y3=-1.0)
+    log("spot-heal-while-recording %s" % spot)
+    call("python-fu-action-record-stop", img, photo, **{"action-name": SEQ_NAME})
+    same = layer_bytes(photo) == before
+    log("record-base-pixels-unchanged %s" % int(same))
+    if not same:
+        die("recording changed the base photo")
+    path = os.path.join(Gimp.directory(), "action-record", "actions", SEQ_NAME + ".json")
+    if not os.path.isfile(path):
+        die("seq json missing " + path)
+    import json
+    data = json.load(open(path, encoding="utf-8"))
+    steps = data.get("steps") or []
+    log("seq-steps %d" % len(steps))
+    if len(steps) != 3:
+        die("expected 3 steps, got %d" % len(steps))
+    procs = [s.get("procedure") for s in steps]
+    log("seq-procs %s" % ",".join(procs))
+    if "spot" in ",".join(procs) or "liquify" in ",".join(procs):
+        die("a non-recordable step was stored")
+    if steps[0].get("args", {}).get("radius") != 8 and steps[0].get("args", {}).get("radius") != 8.0:
+        die("radius was not 8: %s" % steps[0].get("args"))
+    for step in steps:
+        label = " / ".join(p.get("name", "?") for p in (step.get("layer") or {}).get("path") or [])
+        log("seq-step %s radius=%s layer=%s" % (step.get("procedure"), step.get("args"), label))
+        if not (step.get("layer") or {}).get("path"):
+            die("step missing target layer")
+    sub = steps[2]
+    if sub["args"].get("mode") != "subject":
+        die("subject mode not stored")
+    if "加深减淡" in " / ".join(p.get("name", "") for p in sub["layer"]["path"]):
+        die("subject step stored the dodge-and-burn layer")
+    if "Frequency Separation" in " / ".join(p.get("name", "") for p in sub["layer"]["path"]):
+        die("subject step stored a frequency-separation layer")
+    builtin = os.path.join(Gimp.directory(), "action-record", "actions", "自然修图准备.json")
+    log("builtin-json-exists %s" % int(os.path.isfile(builtin)))
+    if os.path.isfile(builtin):
+        die("built-in action wrote a json file")
+    log("seq-record-ok " + path)
+
+
+def phase_seqplay():
+    log("--- layer-target play %s dir %s ---" % (Gimp.version(), Gimp.directory()))
+    ensure_copies()
+    img = load(COPIES["play"])
+    photo = img.get_layers()[0]
+    before = layer_bytes(photo)
+    if "主体选区" in channels(img):
+        die("fresh image already has 主体选区")
+    call("python-fu-action-play", img, photo, **{"action-name": SEQ_NAME})
+    ch = channels(img)
+    diff = 0 if layer_bytes(photo) == before else 1
+    log("seq-play-channel %s pixel-diff %d" % (",".join(ch), diff))
+    for line in tree(img):
+        log("seq-play-layer " + line)
+    if "主体选区" not in ch:
+        die("playback did not create 主体选区")
+    if diff != 0:
+        die("playback changed base pixels")
+    other = load(COPIES["other"])
+    log("seq-second-image-channels %s" % ",".join(channels(other)))
+    if "主体选区" in channels(other):
+        die("second image has 主体选区 without playback")
+    prep = load(COPIES["prepare"])
+    base = prep.get_layers()[0]
+    base_before = layer_bytes(base)
+    call("python-fu-action-play", prep, base, **{"action-name": "自然修图准备"})
+    for line in tree(prep):
+        log("builtin-layer " + line)
+    same = layer_bytes(base) == base_before
+    log("builtin-base %s pixels-unchanged %s visible %s" % (base.get_name(), int(same), int(bool(base.get_visible()))))
+    if not same:
+        die("built-in changed base pixels")
+    builtin = os.path.join(Gimp.directory(), "action-record", "actions", "自然修图准备.json")
+    # also the other version's folder
+    other_dir = os.path.join(os.path.dirname(Gimp.directory()), "3.0" if Gimp.directory().endswith("3.2") else "3.2", "action-record", "actions", "自然修图准备.json")
+    exists = os.path.isfile(builtin) or os.path.isfile(other_dir)
+    log("builtin-json-exists %s" % int(exists))
+    if exists:
+        die("built-in action created a json file")
+    log("seq-play-ok")
+
 if PHASE == "record":
     phase_record()
 elif PHASE == "play":
     phase_play()
+elif PHASE == "seq":
+    phase_seq()
+elif PHASE == "seqplay":
+    phase_seqplay()
 else:
     die("bad phase")

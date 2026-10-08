@@ -9,7 +9,7 @@ from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
 PROC = "python-fu-fsep-oneclick"
 
-def _note_recorded(procedure, args):
+def _note_recorded(procedure, args, image=None, layer=None):
     """If 动作录制 is recording, append this call. Missing recorder = do nothing."""
     try:
         import importlib.util
@@ -21,7 +21,16 @@ def _note_recorded(procedure, args):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         gdir = Gimp.directory() if hasattr(Gimp, "directory") else ""
-        mod.note_step(gdir or "", procedure, args)
+        info = None
+        if image is not None and layer is not None:
+            lpath = os.path.normpath(os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "..", "action_record", "layers.py"))
+            if os.path.isfile(lpath):
+                lspec = importlib.util.spec_from_file_location("retouch_action_layers", lpath)
+                lmod = importlib.util.module_from_spec(lspec)
+                lspec.loader.exec_module(lmod)
+                info = lmod.record_target(image, layer, procedure)
+        mod.note_step(gdir or "", procedure, args, info)
     except Exception:
         return
 
@@ -122,7 +131,7 @@ def run(procedure, run_mode, image, drawables, config, data):
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, None)
     try:
         separate(image, drawables[0], config.get_property("radius"))
-        _note_recorded(PROC, {"radius": float(config.get_property("radius"))})
+        _note_recorded(PROC, {"radius": float(config.get_property("radius"))}, image, drawables[0])
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)

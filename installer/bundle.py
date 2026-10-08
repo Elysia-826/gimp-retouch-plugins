@@ -14,6 +14,8 @@ KINDS = {"ours", "deb", "apt", "git-meson", "zip", "rawfile", "flatpak", "icu-wr
 SUDO_KINDS = {"deb", "apt", "git-meson"}
 GIMPS = ["3.0", "3.2"]
 JSON_OUT = False
+BACKUP_DIR = os.path.join(HOME, "gimp-bundle-backups")
+PRESERVE_DEFAULT = "language,theme,icon-theme,prefer-dark-theme,theme-color-scheme,font-relative-size,override-theme-icon-size,custom-icon-size,icon-size,import-raw-plug-in"
 
 class Usage(Exception):
     pass
@@ -403,15 +405,99 @@ def install(b, g, reinstall, sudo_ok):
         x = tempfile.mkdtemp(dir=CACHE)
         try:
             with tarfile.open(t) as tf:
-                tf.extractall(x)
+                tf.extractall(x, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
             top = os.path.join(x, os.listdir(x)[0], chosen)
             dest = tpl(b["dest"], g)
+            pre = profile_tar(g, "photogimp-pre-%s-%s.tgz" % (g, _stamp()))     # dedicated, never deduped
+            say("    dedicated pre-PhotoGIMP backup: " + pre)
+            rc = os.path.join(dest, "gimprc")
+            old_rc = open(rc, encoding="utf-8", errors="replace").read() if os.path.exists(rc) else ""
             shutil.copytree(top, dest, dirs_exist_ok=True)
             files = [os.path.join(dest, n) for n in os.listdir(top)]
+            keys = [k.strip() for k in p.get("preserve", PRESERVE_DEFAULT).split(",") if k.strip()]
+            kept = preserve_gimprc(rc, old_rc, keys)
+            if kept: say("    kept your gimprc settings: " + ", ".join(kept))
         finally:
             shutil.rmtree(x, ignore_errors=True)
-        return dict(method="config-overlay", srcdir=chosen, files=files)
+        return dict(method="config-overlay", srcdir=chosen, files=files, pre_backup=pre, preserved=kept)
     raise RuntimeError("unknown kind " + k)
+
+def _stamp():
+    return datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+def profile_tar(g, name):
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    out = os.path.join(BACKUP_DIR, name)
+    with tarfile.open(out, "w:gz") as tf:
+        tf.add(os.path.join(HOME, ".config/GIMP", g), arcname=os.path.join(".config/GIMP", g))
+    return out
+
+def preserve_gimprc(rc, old_text, keys):
+    """After an overlay: put back the user's single-line settings for `keys`; drop overlay lines for keys the user never set."""
+    if not os.path.exists(rc):
+        return []
+    new = open(rc, encoding="utf-8", errors="replace").read().split("\n")
+    old = {}
+    for line in old_text.split("\n"):
+        m = re.match(r"^\(([\w-]+)\s.*\)\s*$", line)
+        if m and m.group(1) in keys: old[m.group(1)] = line
+    out, done = [], set()
+    for line in new:
+        m = re.match(r"^\(([\w-]+)[\s)]", line)
+        if m and m.group(1) in keys:
+            k = m.group(1)
+            if k in old and k not in done: out.append(old[k]); done.add(k)
+            continue                                   # overlay value dropped
+        out.append(line)
+    for k, line in old.items():
+        if k not in done:
+            out.insert(1 if out and out[0].startswith("#") else 0, line); done.add(k)
+    with open(rc + ".new", "w", encoding="utf-8") as fh:
+        fh.write("\n".join(out))
+    os.replace(rc + ".new", rc)
+    return sorted(done)
+
+def archive_gimps(archive):
+    with tarfile.open(archive) as tf:
+        names = tf.getnames()
+    return sorted({m.group(1) for n in names for m in [re.match(r"^\.?/?\.config/GIMP/([0-9.]+)(/|$)", n)] if m})
+
+def restore_profile(archive, g, pre_backup=True):
+    """Replace ~/.config/GIMP/<g> with the archive's copy (exact). Current state is backed up first."""
+    prof = os.path.join(HOME, ".config/GIMP", g)
+    pre = backup(g, BACKUP_DIR) if (pre_backup and os.path.isdir(prof)) else None
+    x = tempfile.mkdtemp(prefix=".restore-", dir=os.path.join(HOME, ".config/GIMP"))
+    try:
+        with tarfile.open(archive) as tf:
+            prefix = os.path.join(".config/GIMP", g)
+            norm = lambda n: re.sub(r"^(\./|/)+", "", n)
+            mem = [m for m in tf.getmembers() if norm(m.name) == prefix or norm(m.name).startswith(prefix + "/")]
+            if not mem: raise RuntimeError("archive has no %s" % prefix)
+            kw = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+            tf.extractall(x, members=mem, **kw)
+        src = os.path.join(x, ".config/GIMP", g)
+        old = prof + ".restore-old"
+        if os.path.exists(old): shutil.rmtree(old)
+        if os.path.isdir(prof): os.rename(prof, old)
+        try:
+            os.rename(src, prof)
+        except Exception:
+            if os.path.isdir(old): os.rename(old, prof)
+            raise
+        shutil.rmtree(old, ignore_errors=True)
+    finally:
+        shutil.rmtree(x, ignore_errors=True)
+    return pre
+
+def files_tar(paths, name):
+    """Back up arbitrary (absolute) paths before removal; root-owned but readable files are fine."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    out = os.path.join(BACKUP_DIR, name)
+    with tarfile.open(out, "w:gz") as tf:
+        for p in paths:
+            p = p.rstrip("/")
+            if os.path.lexists(p): tf.add(p, arcname=p.lstrip("/"))
+    return out
 
 def _meson_files(log):
     try:
@@ -552,6 +638,28 @@ def parse_toml(path):
     if unknown: raise Usage("%s: unknown keys %s" % (path, ", ".join(sorted(unknown))))
     return cfg
 
+def prompt_selection(comps, order, presets):
+    names = list(presets)
+    print("Nothing selected. Presets:")
+    for n, p in enumerate(names, 1):
+        print("  %d) %-8s %s" % (n, p, " ".join(presets[p])))
+    print("Components:")
+    for n, i in enumerate(order, len(names) + 1):
+        print("  %d) %-17s %s" % (n, i, comps[i]["desc"]))
+    ans = input("Pick ONE preset (number/name) or components (numbers/ids, comma-separated): ").strip()
+    picks = [x.strip() for x in ans.replace(" ", ",").split(",") if x.strip()]
+    if not picks: raise Usage("nothing selected")
+    allopts = names + order
+    res = []
+    for x in picks:
+        if x.isdigit() and 1 <= int(x) <= len(allopts): x = allopts[int(x) - 1]
+        if x not in allopts: raise Usage("unknown choice '%s'" % x)
+        res.append(x)
+    if len(res) == 1 and res[0] in presets:
+        return {"preset": res[0]}
+    if any(r in presets for r in res): raise Usage("pick either one preset or components, not both")
+    return {"add": res}
+
 def write_last(cfg, selected):
     os.makedirs(STATE, exist_ok=True)
     q = lambda l: "[" + ", ".join('"%s"' % x for x in l) + "]"
@@ -578,11 +686,17 @@ def main(argv):
     ap.add_argument("--yes", "-y", action="store_true", help="no prompts (headless)")
     ap.add_argument("--json", action="store_true"); ap.add_argument("--no-verify", action="store_true")
     ap.add_argument("--backup-dir", default=os.path.join(HOME, "gimp-bundle-backups"))
+    ap.add_argument("--force", action="store_true", help="uninstall even if another installed component requires it")
+    ap.add_argument("--purge", action="store_true", help="uninstall also removes system packages (deb/apt) and shared flatpak runtimes")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--list", action="store_true"); mode.add_argument("--status", action="store_true")
-    mode.add_argument("--check-catalog", action="store_true")
+    mode.add_argument("--check-catalog", action="store_true"); mode.add_argument("--list-backups", action="store_true")
+    mode.add_argument("--uninstall", action="append", metavar="ID[,ID]")
+    mode.add_argument("--restore", metavar="BACKUP.tgz")
     a = ap.parse_args(argv)
     JSON_OUT = a.json
+    global BACKUP_DIR
+    BACKUP_DIR = os.path.abspath(os.path.expanduser(a.backup_dir))
 
     comps, order, builds, presets = load_catalog()
     if a.check_catalog:
@@ -602,8 +716,16 @@ def main(argv):
             print("  %-8s %s" % (n, " ".join(l)))
         return EXIT_OK
 
+    if (a.uninstall or a.restore) and (a.preset or a.add or a.remove or a.config or a.with_raw or a.with_photogimp or a.reinstall):
+        raise Usage("--uninstall/--restore cannot be combined with selection options (--preset/--add/--remove/--config/--with-*/--reinstall)")
+    if a.list_backups:
+        return list_backups(a)
     present = detect_gimps()
     record = rec_load()
+    if a.uninstall:
+        return do_uninstall(a, comps, order, builds, present, record)
+    if a.restore:
+        return do_restore(a, present)
     if a.status:
         rc_cache = {}
         res = {"gimp": {g: {"present": g in present, "packaging": present.get(g)} for g in GIMPS}, "components": []}
@@ -646,7 +768,9 @@ def main(argv):
     if cfg.get("gimp") not in (None, "3.0", "3.2", "all"):
         raise Usage("gimp must be 3.0, 3.2 or all")
     if not cfg.get("preset") and not cfg["add"] and not cfg.get("photogimp"):
-        cfg["preset"] = "full"
+        if a.yes or not sys.stdin.isatty():
+            raise Usage("nothing selected: pass --preset minimal|portrait|full, --add ID[,ID] or --config FILE (see --list)")
+        cfg.update(prompt_selection(comps, order, presets))
     sel = list(presets.get(cfg.get("preset"), [])) if cfg.get("preset") else []
     sel += [i for i in cfg["add"] if i not in sel]
     if cfg.get("photogimp") and "photogimp" in comps and "photogimp" not in sel: sel.append("photogimp")
@@ -800,21 +924,248 @@ def main(argv):
                     it.update(result="failed", reason=(it.get("reason") or "") + " NOT REGISTERED")
     return finish(a, items, cfg, sel, record, dry=False)
 
+# ---------------------------------------------------------------- uninstall / restore / backups
+def _ask_gimp(what, options, a):
+    if a.yes or not sys.stdin.isatty():
+        raise Usage("%s exists for GIMP %s: choose with --gimp" % (what, " and ".join(options)))
+    ans = input("%s exists for GIMP %s. Which? [%s/all] " % (what, " and ".join(options), "/".join(options))).strip()
+    if ans == "all": return options
+    if ans not in options: raise Usage("invalid answer '%s'" % ans)
+    return [ans]
+
+def _uninstall_plan(b, r, a):
+    """-> (action, sudo, skip_reason)"""
+    m = r.get("method")
+    files = [f for f in (r.get("files") or []) if f]
+    if m in ("copy", "generated", "zip"):
+        return "back up + remove %d path(s): %s" % (len(files), " ".join(files)[:160]), False, None
+    if m == "meson-install":
+        if not files: return None, False, "no install log recorded; remove manually"
+        return "back up + sudo rm %d file(s) from meson install log" % len(files), True, None
+    if m in ("deb", "apt"):
+        pk = [r["package"]] if m == "deb" else [x.split("=")[0] for x in r.get("packages", [])]
+        if not a.purge: return None, False, "system package(s) %s kept (use --purge)" % " ".join(pk)
+        return "sudo apt-get remove -y %s" % " ".join(pk), True, None
+    if m == "flatpak":
+        if b and b["params"].get("shared") and not a.purge:
+            return None, False, "shared flatpak runtime %s kept (use --purge)" % r.get("ref")
+        return "flatpak uninstall --user -y %s" % r.get("ref"), False, None
+    if m == "config-overlay":
+        if not r.get("pre_backup") or not os.path.exists(r["pre_backup"]):
+            return None, False, "FAIL:no dedicated pre-install backup recorded"
+        return "restore profile exactly from %s" % r["pre_backup"], False, None
+    return None, False, "FAIL:unknown install method %s" % m
+
+def _rm_paths(paths, b, g):
+    for p in paths:
+        p2 = p.rstrip("/")
+        if os.path.isdir(p2) and not os.path.islink(p2): shutil.rmtree(p2)
+        elif os.path.lexists(p2): os.remove(p2)
+    if b and b["dest"].endswith("/"):
+        d = tpl(b["dest"], g).rstrip("/")
+        if os.path.isdir(d):
+            for root, dirs, files in os.walk(d, topdown=False):
+                if os.path.basename(root) == "__pycache__":
+                    shutil.rmtree(root, ignore_errors=True); continue
+                try: os.rmdir(root)
+                except OSError: pass
+
+def do_uninstall(a, comps, order, builds, present, record):
+    split = lambda l: [x.strip() for v in l for x in v.split(",") if x.strip()]
+    ids = split(a.uninstall)
+    for i in ids:
+        if i not in comps: raise Usage("unknown component '%s' (see --list)" % i)
+    tty = sys.stdin.isatty()
+    if not a.dry_run and not a.yes and not tty:
+        raise Usage("not a terminal: pass --yes for unattended uninstalls (or --dry-run)")
+    rec = record.get("components", {})
+    bmap = {b["build"]: b for b in builds}
+    lock_order = [b["build"] for b in builds]
+    items, notes = [], []
+    for cid in ids:
+        recorded = list(rec.get(cid, {}))
+        if not recorded:
+            items.append(dict(comp=cid, gimp="-", build="-", result="skipped", reason="not in install record (nothing to remove)")); continue
+        gs = [g for g in recorded if g in GIMPS]; hosts = [g for g in recorded if g == "host"]
+        if a.gimp:
+            want = GIMPS if a.gimp == "all" else [a.gimp]
+            targets = [g for g in gs if g in want] + hosts
+        else:
+            targets = (gs if len(gs) < 2 else _ask_gimp(cid, gs, a)) + hosts
+        if not targets:
+            items.append(dict(comp=cid, gimp=a.gimp, build="-", result="skipped", reason="not recorded for GIMP %s" % a.gimp)); continue
+        for g in targets:
+            same = lambda x: g == "host" or "host" in rec[x] or g in rec[x]
+            blockers = [x for x in rec if x not in ids and cid in comps.get(x, {}).get("requires", []) and same(x)]
+            if blockers and not a.force:
+                items.append(dict(comp=cid, gimp=g, build="-", result="failed", reason="blocked: required by installed %s (use --force)" % ", ".join(blockers))); continue
+            if blockers: notes.append("forced: %s still requires %s" % (", ".join(blockers), cid))
+            for x in rec:
+                if x not in ids and cid in comps.get(x, {}).get("recommends", []) and same(x):
+                    notes.append("[%s] warning: installed %s recommends %s; that part of its workflow will be unavailable (%s)"
+                                 % (g, x, cid, comps[cid]["desc"]))
+            bl = rec[cid][g]["builds"]
+            for bid in sorted(bl, key=lambda k: -lock_order.index(k) if k in lock_order else 0):
+                r = bl[bid]; b = bmap.get(bid)
+                act, sudo, skip = _uninstall_plan(b, r, a)
+                it = dict(comp=cid, gimp=g, build=bid, r=r, b=b, sudo=sudo)
+                if skip and skip.startswith("FAIL:"): it.update(result="failed", reason=skip[5:])
+                elif skip: it.update(result="skipped", reason=skip)
+                else: it.update(result="planned", action=act)
+                items.append(it)
+    planned = [i for i in items if i["result"] == "planned"]
+    sudo_steps = [i for i in planned if i.get("sudo")]
+    say("==> uninstall plan (%d action(s), %d with sudo):" % (len(planned), len(sudo_steps)))
+    for it in items:
+        say("    [%s] %-15s %-22s %s%s" % (it["gimp"], it["comp"], it["build"], "SUDO " if it.get("sudo") and it["result"] == "planned" else "",
+                                         it.get("action") if it["result"] == "planned" else "%s: %s" % (it["result"], it["reason"])))
+    for n in notes: say("    " + n)
+    if sudo_steps: say("==> sudo steps: " + "; ".join("%s/%s" % (i["comp"], i["build"]) for i in sudo_steps))
+    clean = lambda: [{k: v for k, v in i.items() if k not in ("b", "r")} for i in items]
+    if a.dry_run:
+        items[:] = clean()
+        return finish(a, items, {"gimp": a.gimp}, ids, record, dry=True, extra="removed")
+    sudo_ok = True
+    if planned and not a.yes:
+        if input("Remove %d item(s)%s? [y/N] " % (len(planned), " (sudo: %d)" % len(sudo_steps) if sudo_steps else "")).strip().lower() not in ("y", "yes"):
+            say("aborted"); return EXIT_USAGE
+        if sudo_steps: sudo_ok = subprocess.run(["sudo", "-v"]).returncode == 0
+    elif sudo_steps:
+        sudo_ok = subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0
+        if not sudo_ok: warn("--yes without passwordless sudo: %d sudo step(s) will fail" % len(sudo_steps))
+    if gimp_running(): warn("GIMP is running; restart it after uninstalling (not killing it).")
+    # one file backup per (component, target) before anything is removed
+    groups = {}
+    for it in planned:
+        if it["r"].get("method") in ("copy", "generated", "zip", "meson-install"):
+            groups.setdefault((it["comp"], it["gimp"]), []).extend(it["r"].get("files") or [])
+    bk = {}
+    for (cid, g), paths in groups.items():
+        bk[(cid, g)] = files_tar(paths, "uninstall-%s-%s-%s.tgz" % (cid, g, _stamp()))
+        say("==> backup of %s files (%s) -> %s" % (cid, g, bk[(cid, g)]))
+    refresh_g = set()
+    for it in planned:
+        r, b, g, m = it["r"], it["b"], it["gimp"], it["r"].get("method")
+        say("==> [%s] %s/%s: %s" % (g, it["comp"], it["build"], it["action"]))
+        try:
+            if it.get("sudo") and not sudo_ok: raise RuntimeError("needs sudo (no passwordless sudo with --yes, or sudo declined)")
+            if m in ("copy", "generated", "zip"):
+                _rm_paths(r.get("files") or [], b, g)
+            elif m == "meson-install":
+                files = [f for f in r["files"] if os.path.lexists(f)]
+                if files: sh(["sudo", "rm", "-f"] + files, check=True)
+                base = tpl(b["dest"], g).rstrip("/") if b else None
+                for d in sorted({os.path.dirname(f) for f in r["files"]}, key=len, reverse=True):
+                    if base and d.startswith(base + "/"): sh(["sudo", "rmdir", "--ignore-fail-on-non-empty", d])
+            elif m in ("deb", "apt"):
+                pk = [r["package"]] if m == "deb" else [x.split("=")[0] for x in r.get("packages", [])]
+                sh(["sudo", "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "remove", "-y"] + pk, check=True)
+            elif m == "flatpak":
+                sh(["flatpak", "uninstall", "--user", "-y", "--noninteractive", r["ref"]], check=True)
+            elif m == "config-overlay":
+                pre = restore_profile(r["pre_backup"], g, pre_backup=True)
+                it["note"] = "state before restore saved: %s" % pre
+            builds_rec = rec[it["comp"]][g]["builds"]
+            builds_rec.pop(it["build"], None)
+            if not builds_rec: rec[it["comp"]].pop(g, None)
+            if not rec[it["comp"]]: rec.pop(it["comp"], None)
+            it.update(result="removed", reason="backup: %s" % bk.get((it["comp"], g), it.get("note", "-")))
+            if g in GIMPS and m != "config-overlay": refresh_g.add(g)
+        except Exception as e:
+            it.update(result="failed", reason=str(e).strip().splitlines()[0][:300]); say("    FAILED: " + it["reason"])
+    if any(i["result"] == "removed" for i in items): rec_save(record)
+    if not a.no_verify:
+        rc_cache = {}
+        for g in sorted(refresh_g):
+            if g in present:
+                say("==> GIMP %s: headless registration refresh" % g); refresh(g, CACHE)
+        for it in items:
+            if it["result"] == "removed" and it.get("b") and it["gimp"] in refresh_g:
+                still = registered(it["b"], it["gimp"], rc_cache)
+                it["registered"] = still
+                if still: it["reason"] += " (WARNING: still registered)"
+    items[:] = clean()
+    return finish(a, items, {"gimp": a.gimp}, ids, record, dry=False, extra="removed")
+
+def do_restore(a, present):
+    path = os.path.abspath(os.path.expanduser(a.restore))
+    if not os.path.isfile(path): raise Usage("backup not found: " + path)
+    try:
+        inside = archive_gimps(path)
+    except (tarfile.TarError, OSError) as e:
+        raise Usage("not a readable .tgz: %s (%s)" % (path, e))
+    if not inside: raise Usage("%s contains no GIMP profile (.config/GIMP/<ver>)" % path)
+    if a.gimp:
+        targets = inside if a.gimp == "all" else [a.gimp]
+        for g in targets:
+            if g not in inside: raise Usage("%s has no profile for GIMP %s (has: %s)" % (path, g, ", ".join(inside)))
+    else:
+        targets = inside if len(inside) < 2 else _ask_gimp("backup " + os.path.basename(path), inside, a)
+    tty = sys.stdin.isatty()
+    if not a.dry_run and not a.yes and not tty:
+        raise Usage("not a terminal: pass --yes (or --dry-run)")
+    items = [dict(comp="profile", gimp=g, build=os.path.basename(path), result="planned",
+                  action="back up current ~/.config/GIMP/%s, then replace it exactly with the archive copy" % g) for g in targets]
+    for it in items: say("    [%s] %s" % (it["gimp"], it["action"]))
+    if a.dry_run:
+        return finish(a, items, {"gimp": a.gimp}, [], {}, dry=True, extra="restored")
+    if not a.yes and input("Restore %d profile(s)? [y/N] " % len(items)).strip().lower() not in ("y", "yes"):
+        say("aborted"); return EXIT_USAGE
+    run = gimp_running()
+    if run: warn("GIMP is running (%s); it may overwrite restored settings on exit. Not killing it." % "; ".join(run))
+    for it in items:
+        try:
+            pre = restore_profile(path, it["gimp"], pre_backup=True)
+            it.update(result="restored", reason="previous state: %s" % pre)
+        except Exception as e:
+            it.update(result="failed", reason=str(e)[:300])
+    return finish(a, items, {"gimp": a.gimp}, [], {}, dry=False, extra="restored")
+
+def list_backups(a):
+    rows = []
+    try:
+        idx = json.load(open(os.path.join(BACKUP_DIR, "index.json")))
+    except (OSError, ValueError):
+        idx = {}
+    deduped = {os.path.basename(v) for v in idx.values()}
+    for p in sorted(glob.glob(os.path.join(BACKUP_DIR, "*.tgz")), key=os.path.getmtime):
+        n = os.path.basename(p)
+        kind = ("profile" if re.match(r"gimp-\d\.\d-config-", n) else "profile (old install.sh)" if n.startswith("gimp-config-")
+                else "photogimp-pre-install" if n.startswith("photogimp-pre-") else "uninstalled-files" if n.startswith("uninstall-") else "other")
+        try:
+            gs = archive_gimps(p) if kind != "uninstalled-files" else []
+        except (tarfile.TarError, OSError):
+            gs = ["?"]
+        rows.append(dict(path=p, kind=kind, gimp=gs, size=os.path.getsize(p), restorable=bool(gs) and gs != ["?"],
+                         dedup_index=n in deduped,
+                         mtime=datetime.datetime.fromtimestamp(os.path.getmtime(p)).astimezone().isoformat(timespec="seconds")))
+    if a.json:
+        print(json.dumps({"backup_dir": BACKUP_DIR, "backups": rows}, indent=2, ensure_ascii=False))
+    else:
+        print("backup dir: " + BACKUP_DIR)
+        print("%-25s %-24s %-8s %8s  %s" % ("TIME", "KIND", "GIMP", "SIZE", "FILE"))
+        for r in rows:
+            print("%-25s %-24s %-8s %7.1fM  %s" % (r["mtime"], r["kind"], ",".join(r["gimp"]) or "-", r["size"] / 1e6, os.path.basename(r["path"])))
+    return EXIT_OK
+
 def _now():
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
-def finish(a, items, cfg, sel, record, dry):
+def finish(a, items, cfg, sel, record, dry, extra=None):
     n_inst = sum(1 for i in items if i["result"] == "installed")
     n_skip = sum(1 for i in items if i["result"] == "skipped")
     n_fail = sum(1 for i in items if i["result"] == "failed")
     n_plan = sum(1 for i in items if i["result"] == "planned")
+    n_extra = sum(1 for i in items if extra and i["result"] == extra)
     if n_fail == 0: status, code = "ok", EXIT_OK
-    elif n_inst + n_skip > 0: status, code = "partial", EXIT_PARTIAL
+    elif n_inst + n_skip + n_extra > 0: status, code = "partial", EXIT_PARTIAL
     else: status, code = "failed", EXIT_FAILED
     reg = lambda r: "-" if r is None else ("yes" if r else "NO")
     if a.json:
-        print(json.dumps({"status": status, "dry_run": dry, "gimp": cfg["gimp"], "components": sel,
-                          "counts": {"installed": n_inst, "skipped": n_skip, "failed": n_fail, "planned": n_plan},
+        counts = {"installed": n_inst, "skipped": n_skip, "failed": n_fail, "planned": n_plan}
+        if extra: counts[extra] = n_extra
+        print(json.dumps({"status": status, "dry_run": dry, "gimp": cfg.get("gimp"), "components": sel,
+                          "counts": counts,
                           "items": [{k: v for k, v in i.items() if k != "b"} for i in items]}, indent=2, ensure_ascii=False))
     else:
         print("\n%-5s %-17s %-22s %-10s %-10s %s" % ("GIMP", "COMPONENT", "BUILD", "RESULT", "REGISTERED", "DETAIL"))
@@ -824,9 +1175,9 @@ def finish(a, items, cfg, sel, record, dry):
                                                        i.get("reason") or i.get("action", "")))
     if dry:
         print("DRY-RUN: %d action(s) would run; nothing was changed" % n_plan)
-    elif status == "ok":
+    elif status == "ok" and not extra:
         write_last(cfg, sel)
-    print("STATUS=%s installed=%d skipped=%d failed=%d" % (status, n_inst, n_skip, n_fail))
+    print("STATUS=%s installed=%d skipped=%d failed=%d%s" % (status, n_inst, n_skip, n_fail, " %s=%d" % (extra, n_extra) if extra else ""))
     return code
 
 if __name__ == "__main__":

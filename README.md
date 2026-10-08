@@ -20,13 +20,19 @@ Linux（GIMP 3.0 apt + GIMP 3.2 Flatpak --user）。逻辑在 `installer/bundle.
 ./install.sh --preset minimal --add gmic --remove dnb_setup --gimp 3.2 --yes
 ./install.sh --config my.toml --yes                   # 用配置文件选择
 ./install.sh --status --json                          # 每个组件、每个 GIMP：installed / version / registered / matches_lock
+./install.sh --uninstall fsep_oneclick --gimp 3.2 --yes   # 卸载（只删安装记录里的文件，先备份）
+./install.sh --uninstall gmic --gimp all --purge --dry-run
+./install.sh --list-backups                           # 列出 ~/gimp-bundle-backups/ 里的备份
+./install.sh --restore ~/gimp-bundle-backups/gimp-3.2-config-….tgz --gimp 3.2 --yes
 ```
+**必须选择**：不给 `--preset`/`--add`/`--config`（或 `--with-*`）时不会默认装 `full`。
+在终端里交互运行会列出编号让你选一个预设或若干组件；`--yes` 或非终端时直接退出 64 并提示怎么选。
 预设：
 | 预设 | 组件 | 说明 |
 |---|---|---|
 | `minimal` | fsep_oneclick, dnb_setup | 不需要 sudo |
 | `portrait` | minimal + resynthesizer, adjustment-layer, batch_export | 人像修图常用 |
-| `full` | 除 photogimp 外全部 | 不选任何预设/组件时的默认值 |
+| `full` | 除 photogimp 外全部 | 需显式选择（不再是默认值） |
 
 选择规则：
 - 预设加上 `--add`、减去 `--remove`。`--with-raw` 等于 `--add raw2tiff`，`--with-photogimp` 等于 `--add photogimp`。
@@ -54,10 +60,32 @@ photogimp = false
 - 不会结束正在运行的 GIMP。只有确实安装了东西的 GIMP 版本，才会用 gimp-console 刷新并检查 pluginrc。
 
 安装记录 `~/.local/share/gimp-retouch-bundle/installed.json` 按组件、按 GIMP 版本记录：构建 id、版本/pin、放置的文件，以及系统级安装方式（deb 包名、meson install-log 文件清单、apt 包）。
-首次运行会把已经装好的组件（通过同样的检查）“收编”进记录（`adopted: true`）。卸载/恢复、交互菜单、Windows 改进属于后续阶段，尚未实现。
+首次运行会把已经装好的组件（通过同样的检查）“收编”进记录（`adopted: true`）。交互菜单（whiptail）和 Windows 改进属于后续阶段，尚未实现。
+
+### 卸载 `--uninstall ID[,ID] [--gimp 3.0|3.2|all] [--force] [--purge] [--dry-run] [--yes] [--json]`
+- 只删除 `installed.json` 里记录的、属于该组件和该 GIMP 版本的文件；删除前打包备份到 `~/gimp-bundle-backups/uninstall-<组件>-<版本>-<时间>.tgz`；成功后更新记录。不在记录里的组件不处理（提示“nothing to remove”）。
+- 组件在 3.0 和 3.2 都有记录而没给 `--gimp`：交互模式询问，无人值守退出 64。主机级组件（raw2tiff、rawtherapee）不需要 `--gimp`。
+- 如果另一个已安装组件 **requires** 它（例如装着 raw2tiff 时卸 rawtherapee），默认拒绝（记为失败），`--force` 可强制；**recommends** 只警告（例如卸 resynthesizer 会提示 fsep_oneclick 的修复选区步骤不可用）。
+- 各安装方式的处理：
+  | 方式 | 默认 | 说明 |
+  |---|---|---|
+  | 复制的文件 / zip / 生成的包装（ours、batcher、adjustment-layer、raw2tiff、gmic_qt_icu77） | 删除 | 先备份；空目录与 `__pycache__` 一并清理 |
+  | meson install-log（3.0 自编译 Resynthesizer） | 删除 | 按记录的 install-log 清单 `sudo rm`；sudo 步骤预先列出 |
+  | deb / apt（3.0 G'MIC-Qt .deb、rawtherapee） | **保留** | 只有 `--purge` 才 `sudo apt-get remove` |
+  | Flatpak 扩展（3.2 G'MIC、Resynthesizer） | 删除 | `flatpak uninstall --user`，属于用户级 |
+  | 共享运行时（`org.freedesktop.Platform 25.08`，lock 里 `shared=1`） | **保留** | 只有 `--purge` 才卸载（其他应用可能在用） |
+  | PhotoGIMP（config-overlay） | 还原 | 用安装时的专用备份把整个配置目录**精确还原**（还原前的状态另存备份） |
+- 支持 `--dry-run`、`--json`、退出码（0/1/2/64）与最后一行 `STATUS=… installed=0 skipped=N failed=N removed=N`。删除后刷新对应 GIMP 的 pluginrc 并确认已注销。
+
+### 备份与恢复
+- `--list-backups [--json]`：列出备份及类型（profile 配置快照 / photogimp-pre-install / uninstalled-files / 旧 install.sh 的双版本快照）、包含的 GIMP 版本、大小、时间。
+- `--restore 备份.tgz [--gimp 3.0|3.2|all] [--dry-run] [--yes]`：先把当前配置备份（按内容去重），再用备份里的 `.config/GIMP/<版本>` **整体替换**当前配置目录（不是合并）。备份里有两个版本而没给 `--gimp` 时：交互询问，无人值守退出 64。只接受包含 `.config/GIMP/<版本>` 的备份；解包使用 tar 的 `data` 过滤器。GIMP 运行中只警告（退出时可能写回设置），不会结束它。
 
 `raw2tiff` 安装为 `~/.local/bin/raw2tiff`（主机级，与 GIMP 版本无关；该目录需在 PATH 中）。
 PhotoGIMP 只在显式选择时安装，会覆盖配置。它从压缩包中优先取 `.config/GIMP/<版本>`；上游目前只有 `.config/GIMP/3.0`，所以 3.2 会回退使用它，`--dry-run` 会显示实际选用的目录。
+安装前会另做一份**专用完整备份**（`photogimp-pre-<版本>-<时间>.tgz`，不去重，路径写入安装记录）。覆盖后会把你原 `gimprc` 里的这些单行设置写回：
+`language`（PhotoGIMP 自带 `(language "")` 会把中文界面改回系统语言）、`theme`、`icon-theme`、`prefer-dark-theme`、`theme-color-scheme`、`font-relative-size`、`override-theme-icon-size`、`custom-icon-size`、`icon-size`、`import-raw-plug-in`（PhotoGIMP 会把 RAW 导入改成占位插件）；
+原来没设置的这些键会去掉 PhotoGIMP 的值（回到 GIMP 默认）。列表可在 `bundle.lock` 的 params 里用 `preserve=` 覆盖。`--uninstall photogimp --gimp <版本>` 用专用备份精确还原整个配置目录——安装 PhotoGIMP 之后对该配置做的其他改动也会被还原（还原前状态另有备份）。
 
 Windows：`powershell -ExecutionPolicy Bypass -File install.ps1 [-Gimp 3.0|3.2|all] [-Only ours] [-Reinstall] [-DryRun]`
 （**未测试**；只自动安装本仓库插件，第三方插件按输出的固定版本手动安装）。

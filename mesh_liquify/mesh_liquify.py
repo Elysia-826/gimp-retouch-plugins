@@ -180,7 +180,77 @@ def _falloff(d, radius, inner, span):
     s = t * t * t * (t * (t * 6.0 - 15.0) + 10.0)   # smootherstep, flat derivative at both ends
     return 1.0 - s
 
-def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise, weights, wx, wy, ww, wh):
+def _sample_y(drawable, layer, x, y, w, h):
+    """Luminance 0..1 of drawable over a layer-pixel rectangle. 1 = white."""
+    _ok, lox, loy = layer.get_offsets()
+    try:
+        _ok2, dox, doy = drawable.get_offsets()
+    except Exception:
+        dox = doy = 0
+    rect = Gegl.Rectangle.new(int(x + lox - dox), int(y + loy - doy), int(w), int(h))
+    raw = drawable.get_buffer().get(rect, 1.0, "Y float", Gegl.AbyssPolicy.NONE)
+    vals = array.array("f")
+    vals.frombytes(_bytes(raw))
+    if len(vals) != w * h:
+        raise RuntimeError("freeze mask size mismatch / 冻结蒙版尺寸不对")
+    return vals
+
+def _freeze_gate(mask, w, h, feather):
+    """0 on frozen pixels (luminance >= 0.5), rising smoothly to 1 over `feather` px on the free side.
+    Returns None when nothing in the rectangle is frozen."""
+    n = w * h
+    INF = 1000000
+    dist = array.array("i", [INF]) * n
+    frozen = False
+    for i, v in enumerate(mask):
+        if v >= 0.5:
+            dist[i] = 0
+            frozen = True
+    if not frozen:
+        return None
+    for y in range(h):
+        row = y * w
+        for x in range(w):
+            i = row + x
+            v = dist[i]
+            if x:
+                v = min(v, dist[i - 1] + 3)
+            if y:
+                v = min(v, dist[i - w] + 3)
+                if x:
+                    v = min(v, dist[i - w - 1] + 4)
+                if x + 1 < w:
+                    v = min(v, dist[i - w + 1] + 4)
+            dist[i] = v
+    for y in range(h - 1, -1, -1):
+        row = y * w
+        for x in range(w - 1, -1, -1):
+            i = row + x
+            v = dist[i]
+            if x + 1 < w:
+                v = min(v, dist[i + 1] + 3)
+            if y + 1 < h:
+                v = min(v, dist[i + w] + 3)
+                if x + 1 < w:
+                    v = min(v, dist[i + w + 1] + 4)
+                if x:
+                    v = min(v, dist[i + w - 1] + 4)
+            dist[i] = v
+    feat = max(1.0, float(feather))
+    gate = array.array("f", [0.0]) * n
+    for i, d3 in enumerate(dist):
+        if d3 <= 0:
+            continue
+        d = d3 / 3.0
+        if d >= feat:
+            gate[i] = 1.0
+        else:
+            u = d / feat
+            gate[i] = u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
+    return gate
+
+def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise, weights, wx, wy, ww, wh,
+           freeze_src=None, freeze_feather=0.0, layer=None):
     """Add one soft brush to the mesh. Returns True if any sample was visited."""
     r = float(radius)
     if r < 1.0:
@@ -209,6 +279,19 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
     iy1 = min(cy1, int(math.ceil(maxy + r)) + 1)
     if not mesh.ensure(ix0, iy0, ix1, iy1):
         return False
+    gate = None
+    gx = gy = gw = 0
+    if freeze_src is not None and layer is not None:
+        feat = float(freeze_feather)
+        if feat <= 0.0:
+            feat = max(8.0, min(80.0, r * 0.25))
+        pad = int(math.ceil(feat))
+        gx = max(0, ix0 - pad); gy = max(0, iy0 - pad)
+        gx1 = min(mesh.lw, ix1 + pad); gy1 = min(mesh.lh, iy1 + pad)
+        if gx1 > gx and gy1 > gy:
+            mask = _sample_y(freeze_src, layer, gx, gy, gx1 - gx, gy1 - gy)
+            gate = _freeze_gate(mask, gx1 - gx, gy1 - gy, feat)
+            gw = gx1 - gx
     inner = max(0.0, min(0.95, float(hardness))) * r
     span = max(1e-6, r - inner)
     r2 = r * r
@@ -265,6 +348,18 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
                 continue
             d = math.sqrt(d2) if d2 > 0.0 else 0.0
             f = _falloff(d, r, inner, span) * wsel
+            g = 1.0
+            if gate is not None:
+                g = gate[(y - gy) * gw + (x - gx)]
+            if g <= 0.0:
+                # Frozen pixels stay put, including any displacement already stored.
+                i = (row + (x - ox)) * 2
+                if a[i] != 0.0 or a[i + 1] != 0.0:
+                    a[i] = 0.0
+                    a[i + 1] = 0.0
+                    touched = True
+                continue
+            f *= g
             if f <= 0.0:
                 continue
             i = (row + (x - ox)) * 2
@@ -325,22 +420,52 @@ def _render(orig, layer, mesh):
         m.connect_to("output", o, "input")
         o.process()
     dst.flush()
-    layer.merge_shadow(True)
+    # merge_shadow only replaces pixels inside the current selection. The shadow
+    # is a full-frame render, so suspend the selection or frozen-vs-free edits
+    # outside it never land (selection-as-freeze).
+    saved = None
+    image = layer.get_image()
+    if image is not None and not Gimp.Selection.is_empty(image):
+        saved = Gimp.Selection.save(image)
+        Gimp.Selection.none(image)
+    try:
+        layer.merge_shadow(True)
+    finally:
+        if saved is not None:
+            image.select_item(Gimp.ChannelOps.REPLACE, saved)
+            image.remove_channel(saved)
     layer.update(0, 0, layer.get_width(), layer.get_height())
 
-def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise):
+def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise,
+            freeze_mode="none", freeze_layer=None, freeze_feather=0.0):
     if layer.is_group() or _pstr(layer, ROLE) == "original":
         raise RuntimeError("Choose a normal paint layer, not the hidden liquify snapshot or a group / 请选择普通图层")
     if layer.get_lock_content():
         raise RuntimeError("Layer is locked / 图层已锁定")
     w, h = layer.get_width(), layer.get_height()
-    hit, bx, by, bw, bh = layer.mask_intersect()
-    if not hit or bw <= 0 or bh <= 0:
-        return
+    freeze_src = None
+    if freeze_mode == "selection":
+        if Gimp.Selection.is_empty(image):
+            raise RuntimeError("No selection to turn into a freeze / 没有选区，没法冻结")
+        freeze_src = image.get_selection()
+        # The selection becomes the freeze. It is not also the edit limit,
+        # otherwise the only pixels we could move would be the frozen ones.
+        bx, by, bw, bh = 0, 0, w, h
+        weights = None
+    else:
+        hit, bx, by, bw, bh = layer.mask_intersect()
+        if not hit or bw <= 0 or bh <= 0:
+            return
+        weights = _weights(image, layer, bx, by, bw, bh)
+        if freeze_mode == "layer":
+            if freeze_layer is None:
+                raise RuntimeError("Pick a freeze layer (white = frozen) / 请选择冻结图层，白色为冻住")
+            if freeze_layer == layer or _pstr(freeze_layer, ROLE) == "original":
+                raise RuntimeError("Freeze layer must be a different layer / 冻结图层不能是正在修的图层或原始像素")
+            freeze_src = freeze_layer
     if x1 < 0.0 or y1 < 0.0:
         x1 = bx + bw / 2.0
         y1 = by + bh / 2.0
-    weights = _weights(image, layer, bx, by, bw, bh)
     key = _pstr(layer, KEY)
     group = _walk_group(image.get_layers(), key) if key else None
     orig = _original_of(group)
@@ -350,7 +475,7 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
     mesh = _load_mesh(layer, w, h) if orig is not None else Mesh(w, h)
     t0 = time.perf_counter()
     touched = deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise,
-                     weights, bx, by, bw, bh)
+                     weights, bx, by, bw, bh, freeze_src, freeze_feather, layer)
     if not touched:
         return
     image.undo_group_start()
@@ -359,6 +484,8 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
             group, orig = _make_state(image, layer)
         _save_mesh(layer, mesh)
         _render(orig, layer, mesh)
+        if os.environ.get("MESH_LIQUIFY_LOG"):
+            rect = Gegl.Rectangle.new(70, 40, 1, 1)
         image.set_selected_layers([layer])
     finally:
         image.undo_group_end()
@@ -381,18 +508,22 @@ def run(procedure, run_mode, image, drawables, config, data):
     if run_mode == Gimp.RunMode.INTERACTIVE:
         GimpUi.init(PROC)
         dlg = GimpUi.ProcedureDialog.new(procedure, config, "柔和液化 / Soft Mesh Liquify")
-        dlg.fill(["mode", "radius", "strength", "hardness", "x1", "y1", "x2", "y2", "angle", "clockwise"])
+        dlg.fill(["mode", "radius", "strength", "hardness", "x1", "y1", "x2", "y2", "angle", "clockwise",
+                  "freeze", "freeze-layer", "freeze-feather"])
         ok = dlg.run()
         dlg.destroy()
         if not ok:
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, None)
     try:
+        fr_i = config.get_choice_id("freeze")
+        fr_mode = ("none", "layer", "selection")[fr_i] if 0 <= fr_i <= 2 else "none"
         liquify(image, drawables[0], _mode(config),
                 config.get_property("x1"), config.get_property("y1"),
                 config.get_property("x2"), config.get_property("y2"),
                 config.get_property("radius"), config.get_property("strength"),
                 config.get_property("hardness"), config.get_property("angle"),
-                config.get_property("clockwise"))
+                config.get_property("clockwise"),
+                fr_mode, config.get_property("freeze-layer"), config.get_property("freeze-feather"))
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
@@ -416,7 +547,9 @@ class MeshLiquify(Gimp.PlugIn):
             "One call is one brush dab or one straight stroke. Edges fall off smoothly (no hard crease). "
             "A hidden group '液化状态 Liquify State' keeps the original pixels so Restore can ease back. "
             "Coordinates are layer pixels; x1/y1 < 0 uses the selection (or layer) center. "
-            "x2/y2 < 0 means a single dab (push then uses angle). Respects an existing selection.",
+            "x2/y2 < 0 means a single dab (push then uses angle). Respects an existing selection. "
+            "Freeze (冻结): a separate layer where white pixels never move, or turn the current selection into a freeze. "
+            "Near a freeze edge, free pixels ease to zero so the mesh does not tear. Frozen pixels themselves stay put.",
             name)
         p.set_attribution("Elysia", "Elysia", "2026")
         ch = Gimp.Choice.new()
@@ -442,6 +575,20 @@ class MeshLiquify(Gimp.PlugIn):
         p.add_double_argument("angle", "Push angle degrees / 推移角度", "Used when there is no stroke end. 0 = right, 90 = down",
                               -360.0, 360.0, 0.0, F)
         p.add_boolean_argument("clockwise", "Twirl clockwise / 顺时针旋转", "Twirl only", True, F)
+        fr = Gimp.Choice.new()
+        fr.add("none", 0, "No freeze / 不冻结", "")
+        fr.add("layer", 1, "Freeze layer / 用冻结图层", "White pixels on that layer stay put")
+        fr.add("selection", 2, "Turn selection into freeze / 把当前选区变成冻结",
+               "Selected pixels stay put. The selection is not also an edit limit for this stroke.")
+        p.add_choice_argument("freeze", "Freeze / 冻结",
+                              "Protected pixels do not move. Paint white on a layer named 冻结, or freeze the current selection.",
+                              fr, "none", F)
+        p.add_drawable_argument("freeze-layer", "Freeze layer / 冻结图层（白=冻住）",
+                                "Used when Freeze is 'layer'. Any gray or color layer; bright = frozen. Not a replacement for the selection limit.",
+                                True, F)
+        p.add_double_argument("freeze-feather", "Freeze edge softness px / 冻结边缘柔化 (0=自动)",
+                              "Free pixels next to the freeze fade to zero over this many pixels. 0 = about a quarter of the brush radius. Frozen pixels never move.",
+                              0.0, 400.0, 0.0, F)
         return p
 
 Gimp.main(MeshLiquify.__gtype__, sys.argv)

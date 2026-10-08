@@ -7,7 +7,7 @@ GIMP 3 (3.0 / 3.2) Python 插件集，跨 Linux / Windows。
 - `dnb_setup` — 一键加深减淡搭建（尚未人工验证），详见 `dnb_setup/README.md`
 - `raw_to_tiff/raw2tiff.sh` — RAW→16 位 TIFF 批量转换（RawTherapee CLI，尚未人工验证），RAW → raw2tiff → batch_export 流程见 `raw_to_tiff/README.md`
 - `batch_export` — 批量导出（尚未人工验证），支持命令行无界面调用，详见 `batch_export/README.md`
-- `mesh_liquify` — 柔和网格液化（尚未人工验证）：推移、膨胀、收缩、旋转、还原。认脸滑杆（眼睛、下颌）是这个插件计划中的下一步，这一版没有。详见 `mesh_liquify/README.md`
+- `mesh_liquify` — 柔和网格液化（尚未人工验证）：推移、膨胀、收缩、旋转、还原，可用冻结蒙版保护不该动的区域。认脸滑杆（眼睛、下颌）是这个插件计划中的下一步，这一版没有。详见 `mesh_liquify/README.md`
 
 ## 可选安装 / 一键重装（尚未人工验证）
 Linux（GIMP 3.0 apt + GIMP 3.2 Flatpak --user）。逻辑在 `installer/bundle.py`（`install.sh` 只是入口，需要 python3）；

@@ -263,7 +263,7 @@ def gray_paint(buf, w, h, bpp):
         for x in range(w):
             buf[(y * w + x) * bpp] = (x * 2 + y) % 256
 img4, layer4, (w4, h4, g0) = new_image(
-    100, 80, Gimp.ImageBaseType.GRAY, Gimp.ImageType.GRAY_IMAGE, "Y' u8", 1, gray_paint)
+    100, 80, Gimp.ImageBaseType.GRAY, Gimp.ImageType.RGBA_IMAGE, "Y' u8", 1, gray_paint)
 call(img4, layer4, mode="bloat", x1=40.0, y1=40.0, x2=-1.0, y2=-1.0,
      radius=24.0, strength=80.0, hardness=0.0, angle=0.0, clockwise=True)
 _, _, g1 = pixels(layer4, "Y' u8")
@@ -340,4 +340,80 @@ if not any((not vis) and "Liquify State" in n for _, n, vis in names):
 
 img.delete()
 img2.delete()
+
+# --- freeze layer: right half white, brush straddles the edge ---
+def half(buf, w, h, bpp):
+    for y in range(h):
+        for x in range(w):
+            i = (y * w + x) * bpp
+            buf[i] = (x * 3) % 256
+            buf[i+1] = (y * 5) % 256
+            buf[i+2] = 40
+            buf[i+3] = 255
+
+imgf, layf, (wf, hf, f0) = new_image(
+    180, 100, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, half)
+fr = Gimp.Layer.new(imgf, "冻结", wf, hf, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
+imgf.insert_layer(fr, None, 0)
+rect = Gegl.Rectangle.new(0, 0, wf, hf)
+fr.get_buffer().set(rect, "R'G'B'A u8", bytes([0, 0, 0, 255]) * (wf * hf))
+rect2 = Gegl.Rectangle.new(110, 0, wf - 110, hf)
+fr.get_buffer().set(rect2, "R'G'B'A u8", bytes([255, 255, 255, 255]) * ((wf - 110) * hf))
+fr.update(0, 0, wf, hf)
+Gimp.Selection.none(imgf)
+call(imgf, layf, mode="push", x1=100.0, y1=50.0, x2=-1.0, y2=-1.0,
+     radius=40.0, strength=80.0, hardness=0.0, angle=180.0, clockwise=True,
+     **{"freeze": "layer", "freeze-layer": fr, "freeze-feather": 16.0})
+_, _, f1 = pixels(layf, "R'G'B'A u8")
+fz, fzmax = count_diff(f0, f1, wf, hf, 4, lambda x, y: x >= 110)
+free, freemax = count_diff(f0, f1, wf, hf, 4, lambda x, y: x <= 90 and (x-100)**2+(y-50)**2 <= 36**2)
+near, nearmax = count_diff(f0, f1, wf, hf, 4, lambda x, y: 100 <= x < 110 and abs(y-50) <= 8)
+far, farmax = count_diff(f0, f1, wf, hf, 4, lambda x, y: 70 <= x <= 82 and abs(y-50) <= 8)
+print("MESH_TEST freeze_layer frozen=%d/%d free=%d near_max=%d far_max=%d" % (fz, fzmax, free, nearmax, farmax), flush=True)
+if fz != 0:
+    die("frozen pixels moved")
+if free < 20:
+    die("freeze blocked the free side")
+if farmax <= nearmax:
+    die("freeze edge was not softer than the free interior (near %d far %d)" % (nearmax, farmax))
+
+# selection still limits, freeze is extra: only x<60 may be edited, freeze covers x>=40
+imgf.select_rectangle(Gimp.ChannelOps.REPLACE, 0, 0, 60, hf)
+# new image so the mesh is fresh
+imgf.delete()
+imgs, lays, (ws, hs, s0b) = new_image(
+    180, 100, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, half)
+frs = Gimp.Layer.new(imgs, "冻结", ws, hs, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
+imgs.insert_layer(frs, None, 0)
+frs.get_buffer().set(Gegl.Rectangle.new(0, 0, ws, hs), "R'G'B'A u8", bytes([0, 0, 0, 255]) * (ws * hs))
+frs.get_buffer().set(Gegl.Rectangle.new(40, 0, ws - 40, hs), "R'G'B'A u8", bytes([255, 255, 255, 255]) * ((ws - 40) * hs))
+frs.update(0, 0, ws, hs)
+imgs.select_rectangle(Gimp.ChannelOps.REPLACE, 0, 0, 70, hs)
+call(imgs, lays, mode="bloat", x1=50.0, y1=50.0, x2=-1.0, y2=-1.0,
+     radius=30.0, strength=90.0, hardness=0.0, angle=0.0, clockwise=True,
+     **{"freeze": "layer", "freeze-layer": frs, "freeze-feather": 8.0})
+_, _, s1b = pixels(lays, "R'G'B'A u8")
+outside_sel, _ = count_diff(s0b, s1b, ws, hs, 4, lambda x, y: x >= 72)
+frozen2, _ = count_diff(s0b, s1b, ws, hs, 4, lambda x, y: x >= 40 and x < 70)
+moved2, _ = count_diff(s0b, s1b, ws, hs, 4, lambda x, y: x <= 30 and abs(y-50) < 20)
+print("MESH_TEST freeze_plus_selection outside=%d frozen=%d moved=%d" % (outside_sel, frozen2, moved2), flush=True)
+if outside_sel != 0 or frozen2 != 0 or moved2 < 5:
+    die("selection limit + freeze failed")
+imgs.delete()
+
+# selection turned into freeze (no extra edit limit)
+imgt, layt, (wt, ht, t0b) = new_image(
+    160, 80, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, half)
+imgt.select_rectangle(Gimp.ChannelOps.REPLACE, 90, 0, 70, ht)
+call(imgt, layt, mode="push", x1=80.0, y1=40.0, x2=-1.0, y2=-1.0,
+     radius=36.0, strength=80.0, hardness=0.0, angle=0.0, clockwise=True,
+     **{"freeze": "selection", "freeze-feather": 10.0})
+_, _, t1b = pixels(layt, "R'G'B'A u8")
+fz3, _ = count_diff(t0b, t1b, wt, ht, 4, lambda x, y: x >= 90)
+mv3, _ = count_diff(t0b, t1b, wt, ht, 4, lambda x, y: x <= 70 and (x-80)**2+(y-40)**2 < 30**2)
+print("MESH_TEST freeze_selection frozen=%d moved=%d" % (fz3, mv3), flush=True)
+if fz3 != 0 or mv3 < 10:
+    die("selection-as-freeze failed")
+imgt.delete()
+
 print("MESH_TEST OK", flush=True)

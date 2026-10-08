@@ -369,9 +369,20 @@ fz, fzmax = count_diff(f0, f1, wf, hf, 4, lambda x, y: x >= 110)
 free, freemax = count_diff(f0, f1, wf, hf, 4, lambda x, y: x <= 90 and (x-100)**2+(y-50)**2 <= 36**2)
 near, nearmax = count_diff(f0, f1, wf, hf, 4, lambda x, y: 100 <= x < 110 and abs(y-50) <= 8)
 far, farmax = count_diff(f0, f1, wf, hf, 4, lambda x, y: 70 <= x <= 82 and abs(y-50) <= 8)
-print("MESH_TEST freeze_layer frozen=%d/%d free=%d near_max=%d far_max=%d" % (fz, fzmax, free, nearmax, farmax), flush=True)
+vis = fr.get_visible()
+still = any(l.get_name() == "冻结" for l in imgf.get_layers())
+state_hidden = None
+for l in imgf.get_layers():
+    if l.is_group() and "Liquify State" in l.get_name():
+        state_hidden = (not l.get_visible())
+print("MESH_TEST freeze_layer frozen=%d/%d free=%d near_max=%d far_max=%d visible=%s still=%s state_hidden=%s" % (
+    fz, fzmax, free, nearmax, farmax, vis, still, state_hidden), flush=True)
 if fz != 0:
     die("frozen pixels moved")
+if vis or not still:
+    die("freeze layer should stay and be hidden")
+if state_hidden is not True:
+    die("liquify state group visibility changed")
 if free < 20:
     die("freeze blocked the free side")
 if farmax <= nearmax:

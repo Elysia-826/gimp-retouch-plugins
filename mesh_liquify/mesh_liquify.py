@@ -484,8 +484,9 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
             group, orig = _make_state(image, layer)
         _save_mesh(layer, mesh)
         _render(orig, layer, mesh)
-        if os.environ.get("MESH_LIQUIFY_LOG"):
-            rect = Gegl.Rectangle.new(70, 40, 1, 1)
+        # A visible freeze layer would cover the photo. Keep it, just hide it.
+        if freeze_mode == "layer" and freeze_layer is not None:
+            freeze_layer.set_visible(False)
         image.set_selected_layers([layer])
     finally:
         image.undo_group_end()
@@ -549,7 +550,7 @@ class MeshLiquify(Gimp.PlugIn):
             "Coordinates are layer pixels; x1/y1 < 0 uses the selection (or layer) center. "
             "x2/y2 < 0 means a single dab (push then uses angle). Respects an existing selection. "
             "Freeze (冻结): a separate layer where white pixels never move, or turn the current selection into a freeze. "
-            "Near a freeze edge, free pixels ease to zero so the mesh does not tear. Frozen pixels themselves stay put.",
+            "Near a freeze edge, free pixels ease to zero so the mesh does not tear. Frozen pixels themselves stay put. The freeze layer is hidden after use; unhide it if you want to edit the mask.",
             name)
         p.set_attribution("Elysia", "Elysia", "2026")
         ch = Gimp.Choice.new()
@@ -577,14 +578,14 @@ class MeshLiquify(Gimp.PlugIn):
         p.add_boolean_argument("clockwise", "Twirl clockwise / 顺时针旋转", "Twirl only", True, F)
         fr = Gimp.Choice.new()
         fr.add("none", 0, "No freeze / 不冻结", "")
-        fr.add("layer", 1, "Freeze layer / 用冻结图层", "White pixels on that layer stay put")
+        fr.add("layer", 1, "Freeze layer / 用冻结图层", "White pixels stay put. The layer is hidden after use; unhide it to edit the mask. 用完会自动隐藏，要改蒙版再打开眼睛。")
         fr.add("selection", 2, "Turn selection into freeze / 把当前选区变成冻结",
                "Selected pixels stay put. The selection is not also an edit limit for this stroke.")
         p.add_choice_argument("freeze", "Freeze / 冻结",
                               "Protected pixels do not move. Paint white on a layer named 冻结, or freeze the current selection.",
                               fr, "none", F)
         p.add_drawable_argument("freeze-layer", "Freeze layer / 冻结图层（白=冻住）",
-                                "Used when Freeze is 'layer'. Any gray or color layer; bright = frozen. Not a replacement for the selection limit.",
+                                "White = frozen. Hidden after this stroke; unhide it if you want to edit the mask. 用完会隐藏该图层，不删除。要改蒙版再取消隐藏。",
                                 True, F)
         p.add_double_argument("freeze-feather", "Freeze edge softness px / 冻结边缘柔化 (0=自动)",
                               "Free pixels next to the freeze fade to zero over this many pixels. 0 = about a quarter of the brush radius. Frozen pixels never move.",

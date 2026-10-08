@@ -621,4 +621,69 @@ if stv.get_visible() or frv.get_visible():
     die("stroke or freeze layer stayed visible")
 imgv.delete()
 
+
+def _state_hidden(img):
+    groups = [l for l in img.get_layers() if l.is_group() and "Liquify" in l.get_name()]
+    return groups
+
+# two strokes, undo one matches only the first, undo again matches the original
+imgu, layu, (wu, hu, uorig) = new_image(
+    180, 100, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4,
+    lambda buf, w, h, bpp: (
+        [buf.__setitem__(slice((y * w + x) * bpp, (y * w + x) * bpp + 4),
+                         bytes([255, 40, 40, 255] if 36 <= x <= 40 and 30 <= y <= 70 else [70, 110, 160, 255]))
+         for y in range(h) for x in range(w)]))
+fru = Gimp.Layer.new(imgu, "冻结", wu, hu, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
+imgu.insert_layer(fru, None, 0)
+fru.get_buffer().set(Gegl.Rectangle.new(0, 0, wu, hu), "R'G'B'A u8", bytes([0, 0, 0, 255]) * (wu * hu))
+fru.get_buffer().set(Gegl.Rectangle.new(140, 0, wu - 140, hu), "R'G'B'A u8", bytes([255, 255, 255, 255]) * ((wu - 140) * hu))
+fru.update(0, 0, wu, hu)
+Gimp.Selection.none(imgu)
+call(imgu, layu, mode="push", path="line", freeze="layer", **{"freeze-layer": fru, "freeze-feather": 8.0},
+     x1=40.0, y1=50.0, x2=-1.0, y2=-1.0,
+     radius=22.0, strength=80.0, hardness=0.0, angle=0.0, clockwise=True)
+_, _, us1 = pixels(layu, "R'G'B'A u8")
+call(imgu, layu, mode="push", path="line", freeze="layer", **{"freeze-layer": fru, "freeze-feather": 8.0},
+     x1=100.0, y1=50.0, x2=-1.0, y2=-1.0,
+     radius=36.0, strength=70.0, hardness=0.0, angle=0.0, clockwise=True)
+_, _, us2 = pixels(layu, "R'G'B'A u8")
+if us1 == us2 or us1 == uorig:
+    die("two strokes did not change pixels in two steps")
+fz2, _ = count_diff(uorig, us2, wu, hu, 4, lambda x, y: x >= 140)
+if fz2 != 0:
+    die("frozen pixels moved after two strokes: %d" % fz2)
+call_named("python-fu-mesh-liquify-undo", imgu, layu)
+_, _, uu1 = pixels(layu, "R'G'B'A u8")
+d1, _ = count_diff(us1, uu1, wu, hu, 4, lambda x, y: True)
+d2, _ = count_diff(us2, uu1, wu, hu, 4, lambda x, y: True)
+fz1, _ = count_diff(uorig, uu1, wu, hu, 4, lambda x, y: x >= 140)
+st1 = _state_hidden(imgu)
+print("MESH_TEST undo1 diff_vs_stroke1=%d diff_vs_stroke2=%d frozen=%d groups=%d hidden=%s" % (
+    d1, d2, fz1, len(st1), all(not g.get_visible() for g in st1)), flush=True)
+if d1 != 0 or d2 == 0 or fz1 != 0 or len(st1) != 1 or st1[0].get_visible():
+    die("undo one stroke did not restore the first stroke")
+call_named("python-fu-mesh-liquify-undo", imgu, layu)
+_, _, uu0 = pixels(layu, "R'G'B'A u8")
+d0, _ = count_diff(uorig, uu0, wu, hu, 4, lambda x, y: True)
+st0 = _state_hidden(imgu)
+print("MESH_TEST undo2 diff_vs_original=%d groups=%d hidden=%s" % (
+    d0, len(st0), all(not g.get_visible() for g in st0)), flush=True)
+if d0 != 0 or len(st0) != 1 or st0[0].get_visible():
+    die("undo both strokes did not match the original, or the hidden group was removed")
+call_named("python-fu-mesh-liquify-redo", imgu, layu)
+_, _, ur1 = pixels(layu, "R'G'B'A u8")
+dr, _ = count_diff(us1, ur1, wu, hu, 4, lambda x, y: True)
+print("MESH_TEST redo1 diff_vs_stroke1=%d" % dr, flush=True)
+if dr != 0:
+    die("redo did not restore the first stroke")
+call_named("python-fu-mesh-liquify-redo", imgu, layu)
+_, _, ur2 = pixels(layu, "R'G'B'A u8")
+dr2, _ = count_diff(us2, ur2, wu, hu, 4, lambda x, y: True)
+fzr, _ = count_diff(uorig, ur2, wu, hu, 4, lambda x, y: x >= 140)
+print("MESH_TEST redo2 diff_vs_stroke2=%d frozen=%d freeze_hidden=%s" % (
+    dr2, fzr, (not fru.get_visible())), flush=True)
+if dr2 != 0 or fzr != 0 or fru.get_visible():
+    die("redo second stroke failed")
+imgu.delete()
+
 print("MESH_TEST OK", flush=True)

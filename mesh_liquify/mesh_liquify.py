@@ -12,10 +12,15 @@ from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
 PROC = "python-fu-mesh-liquify"
 PROC_STROKE = "python-fu-mesh-liquify-stroke-layer"
+PROC_UNDO = "python-fu-mesh-liquify-undo"
+PROC_REDO = "python-fu-mesh-liquify-redo"
 STROKE_NAME = "液化笔触"
 KEY = "mesh-liquify-key"       # shared id on the paint layer and the state group
 ROLE = "mesh-liquify-role"     # "original" on the hidden snapshot layer
 DISP = "mesh-liquify-disp"     # native-endian mesh blob on the paint layer
+HIST = "mesh-liquify-hist"     # earlier meshes, oldest first; one entry per stroke
+REDO = "mesh-liquify-redo"
+HIST_MAX = 24
 MODES = ("push", "bloat", "pinch", "restore", "twirl")
 # max pixel move at full strength, as a fraction of the brush radius
 AMOUNT = {"push": 0.50, "bloat": 0.45, "pinch": 0.45, "twirl": 0.55}
@@ -107,16 +112,82 @@ def _load_mesh(layer, w, h):
         return Mesh(w, h)
     return m
 
-def _save_mesh(layer, mesh):
+def _mesh_blob(mesh):
+    """MLQ1 bytes, or empty bytes when the mesh is identity."""
     if mesh.bw == 0:
-        layer.detach_parasite(DISP)
-        return
+        return b""
     a = mesh.a
     if sys.byteorder != "little":
         a = array.array("f", a)
         a.byteswap()
-    blob = struct.pack("<4sIIIIIII", b"MLQ1", 1, mesh.lw, mesh.lh, mesh.x, mesh.y, mesh.bw, mesh.bh) + a.tobytes()
+    return struct.pack("<4sIIIIIII", b"MLQ1", 1, mesh.lw, mesh.lh, mesh.x, mesh.y, mesh.bw, mesh.bh) + a.tobytes()
+
+def _mesh_from_blob(blob, w, h):
+    m = Mesh(w, h)
+    if not blob:
+        return m
+    head = struct.calcsize("<4sIIIIIII")
+    if len(blob) < head:
+        return m
+    magic, ver, lw, lh, x, y, bw, bh = struct.unpack_from("<4sIIIIIII", blob)
+    if magic != b"MLQ1" or ver != 1 or lw != w or lh != h or bw == 0 or bh == 0:
+        return m
+    data = blob[head:]
+    need = bw * bh * 2 * 4
+    if len(data) != need or x < 0 or y < 0 or x + bw > w or y + bh > h:
+        return m
+    m.x, m.y, m.bw, m.bh = x, y, bw, bh
+    m.a = array.array("f")
+    m.a.frombytes(data)
+    if sys.byteorder != "little":
+        m.a.byteswap()
+    if len(m.a) != bw * bh * 2:
+        return Mesh(w, h)
+    return m
+
+def _save_mesh(layer, mesh):
+    blob = _mesh_blob(mesh)
+    if not blob:
+        layer.detach_parasite(DISP)
+        return
     _pset(layer, DISP, base64.b64encode(blob).decode("ascii"))
+
+def _load_stack(layer, name):
+    text = _pstr(layer, name)
+    if not text:
+        return []
+    try:
+        raw = base64.b64decode(text.encode("ascii"), validate=True)
+    except Exception:
+        return []
+    head = struct.calcsize("<4sII")
+    if len(raw) < head:
+        return []
+    magic, ver, count = struct.unpack_from("<4sII", raw)
+    if magic != b"MLHS" or ver != 1 or count > 1000:
+        return []
+    off = head
+    out = []
+    for _i in range(count):
+        if off + 4 > len(raw):
+            return []
+        n = struct.unpack_from("<I", raw, off)[0]
+        off += 4
+        if n > len(raw) - off:
+            return []
+        out.append(raw[off:off + n])
+        off += n
+    return out
+
+def _save_stack(layer, name, items):
+    if not items:
+        layer.detach_parasite(name)
+        return
+    parts = [struct.pack("<4sII", b"MLHS", 1, len(items))]
+    for blob in items:
+        parts.append(struct.pack("<I", len(blob)))
+        parts.append(blob)
+    _pset(layer, name, base64.b64encode(b"".join(parts)).decode("ascii"))
 
 def _walk_group(layers, key):
     for layer in layers:
@@ -146,6 +217,8 @@ def _make_state(image, layer):
     orig.set_name("原始像素 Original")
     orig.detach_parasite(DISP)
     orig.detach_parasite(KEY)
+    orig.detach_parasite(HIST)
+    orig.detach_parasite(REDO)
     if not image.insert_layer(orig, group, 0):
         raise RuntimeError("insert original snapshot failed")
     orig.set_lock_content(True)
@@ -158,6 +231,8 @@ def _drop_state(image, layer, group):
     if group is not None:
         image.remove_layer(group)
     layer.detach_parasite(DISP)
+    layer.detach_parasite(HIST)
+    layer.detach_parasite(REDO)
 
 def _weights(image, layer, x, y, w, h):
     """Selection as 0..1, or None when there is no selection (whole layer)."""
@@ -909,6 +984,7 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
     mesh = _load_mesh(layer, w, h) if orig is not None else Mesh(w, h)
     t0 = time.perf_counter()
     sample = orig if orig is not None else layer
+    before_blob = _mesh_blob(mesh)
     touched = deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise,
                      weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample, poly)
     if not touched:
@@ -917,6 +993,12 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
     try:
         if orig is None:
             group, orig = _make_state(image, layer)
+        hist = _load_stack(layer, HIST)
+        hist.append(before_blob)
+        if len(hist) > HIST_MAX:
+            hist = hist[-HIST_MAX:]
+        _save_stack(layer, HIST, hist)
+        _save_stack(layer, REDO, [])
         _save_mesh(layer, mesh)
         _render(orig, layer, mesh)
         # A visible freeze layer would cover the photo. Keep it, just hide it.
@@ -972,6 +1054,61 @@ def run(procedure, run_mode, image, drawables, config, data):
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
 
+def step_stroke(image, layer, redo):
+    """Put back the mesh from one stroke ago, or reapply an undone stroke.
+    The hidden 液化状态 group stays; pixels are drawn from it again."""
+    if layer.is_group() or _pstr(layer, ROLE) == "original":
+        raise RuntimeError("Choose the paint layer, not the hidden snapshot / 请选择正在修的图层")
+    w, h = layer.get_width(), layer.get_height()
+    key = _pstr(layer, KEY)
+    group = _walk_group(image.get_layers(), key) if key else None
+    orig = _original_of(group)
+    if orig is None or group is None:
+        raise RuntimeError("The hidden group 液化状态 is missing, so this stroke cannot be stepped back. Do not delete that group. / 没有隐藏的「液化状态」组，撤不回这一笔。别删那个组。")
+    src_name = REDO if redo else HIST
+    dst_name = HIST if redo else REDO
+    stack = _load_stack(layer, src_name)
+    if not stack:
+        if redo:
+            raise RuntimeError("Nothing to redo / 没有可重做的液化笔")
+        raise RuntimeError("Nothing to undo / 没有可撤销的液化笔")
+    blob = stack.pop()
+    current = _mesh_blob(_load_mesh(layer, w, h))
+    other = _load_stack(layer, dst_name)
+    other.append(current)
+    if len(other) > HIST_MAX:
+        other = other[-HIST_MAX:]
+    mesh = _mesh_from_blob(blob, w, h)
+    image.undo_group_start()
+    try:
+        _save_stack(layer, src_name, stack)
+        _save_stack(layer, dst_name, other)
+        _save_mesh(layer, mesh)
+        _render(orig, layer, mesh)
+        if group is not None:
+            group.set_visible(False)
+        image.set_selected_layers([layer])
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+
+def run_step(procedure, run_mode, image, drawables, config, data):
+    if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
+        return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
+            GLib.Error("Select exactly one layer / 请选择一个图层"))
+    try:
+        step_stroke(image, drawables[0], bool(data))
+    except Exception as e:
+        return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
+
+
+def run_undo_stroke(procedure, run_mode, image, drawables, config, data):
+    return run_step(procedure, run_mode, image, drawables, config, False)
+
+def run_redo_stroke(procedure, run_mode, image, drawables, config, data):
+    return run_step(procedure, run_mode, image, drawables, config, True)
+
 def run_prepare_stroke(procedure, run_mode, image, drawables, config, data):
     if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
         return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
@@ -988,12 +1125,34 @@ class MeshLiquify(Gimp.PlugIn):
         return False
 
     def do_query_procedures(self):
-        return [PROC, PROC_STROKE]
+        return [PROC, PROC_STROKE, PROC_UNDO, PROC_REDO]
 
     def do_create_procedure(self, name):
         if name == PROC_STROKE:
             return self._make_stroke_proc(name)
+        if name == PROC_UNDO:
+            return self._make_step_proc(name, False)
+        if name == PROC_REDO:
+            return self._make_step_proc(name, True)
         return self._make_liquify_proc(name)
+
+    def _make_step_proc(self, name, redo):
+        fn = run_redo_stroke if redo else run_undo_stroke
+        label = "重做上一笔液化 / Redo Last Liquify Stroke" if redo else "撤销上一笔液化 / Undo Last Liquify Stroke"
+        blurb = ("Put back the stroke that was just undone. 把刚撤掉的那一笔液化再做上。"
+                 if redo else
+                 "Step back one liquify stroke. The hidden group 液化状态 stays. 退回上一笔液化，不删除隐藏的「液化状态」组。")
+        p = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, fn, None)
+        p.set_image_types("RGB*, GRAY*")
+        p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
+        p.set_menu_label(label)
+        p.add_menu_path("<Image>/Filters/修图工具/")
+        p.set_documentation(blurb,
+            "This is not GIMP's Ctrl+Z. Each liquify stroke is kept, and this puts the picture back to the previous stroke, redrawn from the hidden original. "
+            "Redo walks forward again. A new stroke clears the redo list. Up to %d strokes are remembered. Deleting the hidden group still loses the way back." % HIST_MAX,
+            name)
+        p.set_attribution("Elysia", "Elysia", "2026")
+        return p
 
     def _make_stroke_proc(self, name):
         p = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run_prepare_stroke, None)

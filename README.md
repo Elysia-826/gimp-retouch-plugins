@@ -26,7 +26,23 @@ Linux（GIMP 3.0 apt + GIMP 3.2 Flatpak --user）。逻辑在 `installer/bundle.
 ./install.sh --restore ~/gimp-bundle-backups/gimp-3.2-config-….tgz --gimp 3.2 --yes
 ```
 **必须选择**：不给 `--preset`/`--add`/`--config`（或 `--with-*`）时不会默认装 `full`。
-在终端里交互运行会列出编号让你选一个预设或若干组件；`--yes` 或非终端时直接退出 64 并提示怎么选。
+在终端里交互运行会打开下面的选择菜单；`--yes` 或非终端时直接退出 64 并提示怎么选。
+
+### 交互菜单（终端里不带选择运行，或加 `--menu`）
+```bash
+./install.sh                                  # 没有任何选择 -> 菜单
+./install.sh --menu --preset portrait         # 已有选择也强制打开菜单，菜单里预选这些
+./install.sh --dry-run                        # 菜单选完只预览
+```
+1. **预设**（单选）：minimal / portrait / full，`last`（上次成功的 `last.toml`，存在时为默认），`given`（命令行/`--config` 给定的选择，用 `--menu` 时为默认），`custom`（从空白开始）。
+2. **组件**（多选）：按上一步预勾选，显示 `components.txt` 的中文说明、类别、requires、是否覆盖配置。
+3. **GIMP**：两个版本都在时选 3.0 / 3.2 / all（默认取命令行、上次或 all）。
+4. 选择先写入 `~/.local/share/gimp-retouch-bundle/menu-selection.toml` 并打印出来，然后**按这个文件执行**（以后可用 `./install.sh --config <该文件>` 无人值守重放）。
+5. 确认前列出：动作数、所有 sudo 步骤、自动补上的 requires、recommends 提示、功能重叠提示。取消 = 退出 64，不做任何改动。
+
+有 `whiptail` 时用 whiptail 对话框（空格勾选、回车确认、Esc 取消）；没有就退回编号文本提示（输入编号或 id 切换勾选，可多个，`all`/`none`，直接回车完成）。
+`BUNDLE_MENU=text` 可强制文本模式。`--yes`、非终端、或与 `--status/--list/--uninstall/--restore` 同用时 `--menu` 报错 64，绝不会在无人值守时弹出。
+测试/隔离用：环境变量 `GIMP_BUNDLE_STATE=<目录>` 改变状态目录（installed.json、last.toml、menu-selection.toml）。
 预设：
 | 预设 | 组件 | 说明 |
 |---|---|---|
@@ -60,7 +76,7 @@ photogimp = false
 - 不会结束正在运行的 GIMP。只有确实安装了东西的 GIMP 版本，才会用 gimp-console 刷新并检查 pluginrc。
 
 安装记录 `~/.local/share/gimp-retouch-bundle/installed.json` 按组件、按 GIMP 版本记录：构建 id、版本/pin、放置的文件，以及系统级安装方式（deb 包名、meson install-log 文件清单、apt 包）。
-首次运行会把已经装好的组件（通过同样的检查）“收编”进记录（`adopted: true`）。交互菜单（whiptail）和 Windows 改进属于后续阶段，尚未实现。
+首次运行会把已经装好的组件（通过同样的检查）“收编”进记录（`adopted: true`）。Windows 改进属于后续阶段，尚未实现。
 
 ### 卸载 `--uninstall ID[,ID] [--gimp 3.0|3.2|all] [--force] [--purge] [--dry-run] [--yes] [--json]`
 - 只删除 `installed.json` 里记录的、属于该组件和该 GIMP 版本的文件；删除前打包备份到 `~/gimp-bundle-backups/uninstall-<组件>-<版本>-<时间>.tgz`；成功后更新记录。不在记录里的组件不处理（提示“nothing to remove”）。

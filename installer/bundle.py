@@ -5,7 +5,7 @@ import argparse, datetime, glob, hashlib, json, os, re, shutil, subprocess, sys,
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOME = os.path.expanduser("~")
-STATE = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.join(HOME, ".local/share")), "gimp-retouch-bundle")
+STATE = os.environ.get("GIMP_BUNDLE_STATE") or os.path.join(os.environ.get("XDG_DATA_HOME", os.path.join(HOME, ".local/share")), "gimp-retouch-bundle")
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.join(HOME, ".cache")), "gimp-retouch-bundle")
 RECORD = os.path.join(STATE, "installed.json")
 LAST = os.path.join(STATE, "last.toml")
@@ -638,28 +638,6 @@ def parse_toml(path):
     if unknown: raise Usage("%s: unknown keys %s" % (path, ", ".join(sorted(unknown))))
     return cfg
 
-def prompt_selection(comps, order, presets):
-    names = list(presets)
-    print("Nothing selected. Presets:")
-    for n, p in enumerate(names, 1):
-        print("  %d) %-8s %s" % (n, p, " ".join(presets[p])))
-    print("Components:")
-    for n, i in enumerate(order, len(names) + 1):
-        print("  %d) %-17s %s" % (n, i, comps[i]["desc"]))
-    ans = input("Pick ONE preset (number/name) or components (numbers/ids, comma-separated): ").strip()
-    picks = [x.strip() for x in ans.replace(" ", ",").split(",") if x.strip()]
-    if not picks: raise Usage("nothing selected")
-    allopts = names + order
-    res = []
-    for x in picks:
-        if x.isdigit() and 1 <= int(x) <= len(allopts): x = allopts[int(x) - 1]
-        if x not in allopts: raise Usage("unknown choice '%s'" % x)
-        res.append(x)
-    if len(res) == 1 and res[0] in presets:
-        return {"preset": res[0]}
-    if any(r in presets for r in res): raise Usage("pick either one preset or components, not both")
-    return {"add": res}
-
 def write_last(cfg, selected):
     os.makedirs(STATE, exist_ok=True)
     q = lambda l: "[" + ", ".join('"%s"' % x for x in l) + "]"
@@ -686,6 +664,7 @@ def main(argv):
     ap.add_argument("--yes", "-y", action="store_true", help="no prompts (headless)")
     ap.add_argument("--json", action="store_true"); ap.add_argument("--no-verify", action="store_true")
     ap.add_argument("--backup-dir", default=os.path.join(HOME, "gimp-bundle-backups"))
+    ap.add_argument("--menu", action="store_true", help="interactive menu (whiptail or numbered prompt) even when a selection is given; terminal only")
     ap.add_argument("--force", action="store_true", help="uninstall even if another installed component requires it")
     ap.add_argument("--purge", action="store_true", help="uninstall also removes system packages (deb/apt) and shared flatpak runtimes")
     mode = ap.add_mutually_exclusive_group()
@@ -716,8 +695,10 @@ def main(argv):
             print("  %-8s %s" % (n, " ".join(l)))
         return EXIT_OK
 
-    if (a.uninstall or a.restore) and (a.preset or a.add or a.remove or a.config or a.with_raw or a.with_photogimp or a.reinstall):
-        raise Usage("--uninstall/--restore cannot be combined with selection options (--preset/--add/--remove/--config/--with-*/--reinstall)")
+    if (a.uninstall or a.restore) and (a.preset or a.add or a.remove or a.config or a.with_raw or a.with_photogimp or a.reinstall or a.menu):
+        raise Usage("--uninstall/--restore cannot be combined with selection options (--preset/--add/--remove/--config/--with-*/--reinstall/--menu)")
+    if a.menu and (a.list or a.status or a.check_catalog or a.list_backups):
+        raise Usage("--menu is only for installing")
     if a.list_backups:
         return list_backups(a)
     present = detect_gimps()
@@ -767,10 +748,26 @@ def main(argv):
         if i not in comps: raise Usage("unknown component '%s' (see --list)" % i)
     if cfg.get("gimp") not in (None, "3.0", "3.2", "all"):
         raise Usage("gimp must be 3.0, 3.2 or all")
-    if not cfg.get("preset") and not cfg["add"] and not cfg.get("photogimp"):
-        if a.yes or not sys.stdin.isatty():
+    menu_ui = None
+    nothing = not cfg.get("preset") and not cfg["add"] and not cfg.get("photogimp")
+    if a.menu or nothing:
+        if a.yes or not sys.stdin.isatty() or not sys.stdout.isatty():
+            if a.menu: raise Usage("--menu needs an interactive terminal and cannot be used with --yes")
             raise Usage("nothing selected: pass --preset minimal|portrait|full, --add ID[,ID] or --config FILE (see --list)")
-        cfg.update(prompt_selection(comps, order, presets))
+        import menu
+        last = {}
+        if os.path.exists(LAST):
+            try: last = parse_toml(LAST)
+            except Usage: last = {}
+        try:
+            ui, path = menu.run_menu(cfg, last, comps, order, builds, presets, present, os.path.join(STATE, "menu-selection.toml"))
+        except menu.Abort as e:
+            raise Usage("menu: %s" % e)
+        cfg = parse_toml(path)                 # execute exactly what was written
+        cfg.setdefault("add", []); cfg.setdefault("remove", [])
+        for i in cfg["add"] + cfg["remove"]:
+            if i not in comps: raise Usage("unknown component '%s' in %s" % (i, path))
+        menu_ui = (menu, ui, path)
     sel = list(presets.get(cfg.get("preset"), [])) if cfg.get("preset") else []
     sel += [i for i in cfg["add"] if i not in sel]
     if cfg.get("photogimp") and "photogimp" in comps and "photogimp" not in sel: sel.append("photogimp")
@@ -864,8 +861,13 @@ def main(argv):
     # ---- confirm + sudo
     sudo_ok = True
     if planned and not a.yes:
-        q = "Proceed with %d action(s)%s? [y/N] " % (len(planned), " (sudo: %d)" % len(sudo_steps) if sudo_steps else "")
-        if input(q).strip().lower() not in ("y", "yes"):
+        if menu_ui:
+            mod, ui, path = menu_ui
+            ok = mod.confirm(ui, path, len(planned), ["[%s] %s/%s: %s" % (it["gimp"], it["comp"], it["build"], "; ".join(x.strip() for x in re.split(r"\s*[;]\s*", it["action"]) if "sudo" in x)[:160] or it["action"][:120]) for it in sudo_steps], notes)
+        else:
+            q = "Proceed with %d action(s)%s? [y/N] " % (len(planned), " (sudo: %d)" % len(sudo_steps) if sudo_steps else "")
+            ok = input(q).strip().lower() in ("y", "yes")
+        if not ok:
             say("aborted"); return EXIT_USAGE
         if sudo_steps:
             sudo_ok = subprocess.run(["sudo", "-v"]).returncode == 0

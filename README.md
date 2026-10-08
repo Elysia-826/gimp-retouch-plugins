@@ -103,8 +103,9 @@ PhotoGIMP 只在显式选择时安装，会覆盖配置。它从压缩包中优�
 `language`（PhotoGIMP 自带 `(language "")` 会把中文界面改回系统语言）、`theme`、`icon-theme`、`prefer-dark-theme`、`theme-color-scheme`、`font-relative-size`、`override-theme-icon-size`、`custom-icon-size`、`icon-size`、`import-raw-plug-in`（PhotoGIMP 会把 RAW 导入改成占位插件）；
 原来没设置的这些键会去掉 PhotoGIMP 的值（回到 GIMP 默认）。列表可在 `bundle.lock` 的 params 里用 `preserve=` 覆盖。`--uninstall photogimp --gimp <版本>` 用专用备份精确还原整个配置目录——安装 PhotoGIMP 之后对该配置做的其他改动也会被还原（还原前状态另有备份）。
 
-Windows：`powershell -ExecutionPolicy Bypass -File install.ps1 [-Gimp 3.0|3.2|all] [-Only ours] [-Reinstall] [-DryRun]`
-（**未测试**；只自动安装本仓库插件，第三方插件按输出的固定版本手动安装）。
+Windows：`powershell -ExecutionPolicy Bypass -File install.ps1 [-Gimp 3.0|3.2|all] [-Only ours] [-BackupDir D:\gimp-bundle-backups] [-Reinstall] [-DryRun]`
+（已在 Windows 11 + GIMP 3.2.6 上实测安装和无界面注册/运行，插件对话框尚未人工验证；只自动安装本仓库插件，第三方插件按输出的固定版本手动安装）。
+`-Gimp all` 只装到已有配置目录的版本；刚装好、还没启动过的 GIMP 请写明 `-Gimp 3.2`。
 
 ### 组件（`components.txt`，`./install.sh --list`）
 | 组件 | 类别 | requires / recommends | 说明 |

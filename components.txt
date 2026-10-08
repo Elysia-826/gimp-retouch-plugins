@@ -8,6 +8,7 @@ spot_heal        |ours       |resynthesizer|-            |linux,windows|n|点修
 dnb_flow         |ours       |-          |dnb_setup    |linux,windows|n|轻柔涂抹：在灰色加深减淡层上按流量叠、不透明度封顶（尚未人工验证）
 subject_mask     |ours       |mesh_liquify|-            |linux,windows|n|选出主体或脸部皮肤：边缘略虚，不是发丝抠图（尚未人工验证）
 action_record     |ours       |-          |fsep_oneclick,dnb_setup,subject_mask|linux,windows|n|动作录制：记下频率分离、加深减淡搭建和选出主体，按名字再播放（尚未人工验证）
+portrait_brush    |ours       |-          |fsep_oneclick,dnb_setup|linux,windows|n|人像笔刷：柔圆、皮肤毛孔、细发丝三支自制笔刷，一键设好加深减淡/皮肤纹理/修复仿制/发丝的笔刷、大小和低不透明度（尚未人工验证）
 raw2tiff         |ours       |rawtherapee|batch_export |linux        |n|RAW 批量转 16 位 TIFF（rawtherapee-cli），安装为 ~/.local/bin/raw2tiff
 gmic             |third-party|-          |-            |linux        |n|G'MIC-Qt 滤镜合集（3.0 用 .deb，3.2 用 Flathub 扩展 + ICU77 包装）
 resynthesizer    |third-party|-          |-            |linux        |n|Resynthesizer 修复选区/纹理合成（3.0 源码编译 v3.0，3.2 用 Flathub 扩展）

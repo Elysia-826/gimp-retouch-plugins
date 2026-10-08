@@ -1,0 +1,216 @@
+# Headless tests for python-fu-subject-select. Run with python-fu-eval.
+import array
+import json
+import os
+
+import gi
+
+gi.require_version("Gimp", "3.0")
+gi.require_version("Gegl", "0.4")
+from gi.repository import Gimp, Gegl, Gio
+
+Gegl.init(None)
+pdb = Gimp.get_pdb()
+
+
+def die(msg):
+    print("SUBJ_TEST FAIL " + msg, flush=True)
+    raise SystemExit(1)
+
+
+def call(img, layer, mode, feather):
+    proc = pdb.lookup_procedure("python-fu-subject-select")
+    if proc is None:
+        die("procedure missing")
+    cfg = proc.create_config()
+    cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+    cfg.set_property("image", img)
+    if hasattr(cfg, "set_core_object_array"):
+        cfg.set_core_object_array("drawables", [layer])
+    else:
+        cfg.set_property("drawables", [layer])
+    cfg.set_property("mode", mode)
+    cfg.set_property("feather", float(feather))
+    return proc.run(cfg)
+
+
+def status_ok(res):
+    st = res.index(0)
+    name = getattr(st, "value_nick", None) or str(st)
+    return ("SUCCESS" in str(name).upper()) or str(st).endswith("SUCCESS") or str(st) == "3"
+
+
+def layer_bytes(layer):
+    w, h = layer.get_width(), layer.get_height()
+    raw = layer.get_buffer().get(Gegl.Rectangle.new(0, 0, w, h), 1.0, "R'G'B' u8", Gegl.AbyssPolicy.NONE)
+    return w, h, bytes(raw)
+
+
+def selection_floats(img):
+    w, h = img.get_width(), img.get_height()
+    raw = img.get_selection().get_buffer().get(
+        Gegl.Rectangle.new(0, 0, w, h), 1.0, "Y float", Gegl.AbyssPolicy.NONE)
+    vals = array.array("f")
+    vals.frombytes(bytes(raw))
+    if len(vals) != w * h:
+        die("selection size %d != %d" % (len(vals), w * h))
+    return w, h, vals
+
+
+def mean_box(vals, w, x0, y0, x1, y1):
+    acc = 0.0
+    n = 0
+    for y in range(y0, y1):
+        row = y * w
+        for x in range(x0, x1):
+            acc += vals[row + x]
+            n += 1
+    return acc / float(n or 1)
+
+
+def frac_box(vals, w, x0, y0, x1, y1, thresh):
+    n = 0
+    hit = 0
+    for y in range(y0, y1):
+        row = y * w
+        for x in range(x0, x1):
+            n += 1
+            if vals[row + x] > thresh:
+                hit += 1
+    return hit / float(n or 1)
+
+
+def write_preview(path, photo, pw, sel, sw, box):
+    bx, by, bw, bh = box
+    y1 = max(0, int(by) - 20)
+    y2 = min(photo and len(photo) // (pw * 3) or 0, int(by + 0.48 * bh))
+    # photo is RGB bytes, row stride pw*3. Crop width 480 max by stepping.
+    x1 = 0
+    x2 = pw
+    ch = y2 - y1
+    if ch < 2:
+        return
+    step = max(1, int(round(pw / 480.0)))
+    out_w = (x2 - x1) // step
+    out_h = ch // step
+    raw = bytearray(out_w * out_h * 3)
+    for oy in range(out_h):
+        sy = y1 + oy * step
+        for ox in range(out_w):
+            sx = x1 + ox * step
+            i = (sy * pw + sx) * 3
+            s = sel[sy * sw + sx]
+            r, g, b = photo[i], photo[i + 1], photo[i + 2]
+            if s < 0.08:
+                r, g, b = int(r * 0.25), int(g * 0.25), int(b * 0.25)
+            o = (oy * out_w + ox) * 3
+            raw[o] = r
+            raw[o + 1] = g
+            raw[o + 2] = b
+    with open(path, "wb") as f:
+        f.write(("P6\n%d %d\n255\n" % (out_w, out_h)).encode("ascii"))
+        f.write(raw)
+    print("SUBJ_TEST preview %s %dx%d" % (path, out_w, out_h), flush=True)
+
+
+print("SUBJ_TEST begin", flush=True)
+
+blob = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path("/tmp/person_blob.png"))
+layer = blob.get_layers()[0]
+before = layer_bytes(layer)[2]
+res = call(blob, layer, "subject", 2.0)
+print("SUBJ_TEST blob_status", res.index(0), flush=True)
+if not status_ok(res):
+    die("blob subject failed")
+after = layer_bytes(layer)[2]
+if before != after:
+    die("blob pixels changed")
+bw, bh, sel = selection_floats(blob)
+head = mean_box(sel, bw, 100, 110, 140, 140)
+corner = mean_box(sel, bw, 0, 0, 12, 12)
+far = mean_box(sel, bw, 210, 10, 235, 40)
+body = mean_box(sel, bw, 90, 170, 150, 250)
+# 1px stray line drawn at x=124, y=40..68
+stray_vals = [sel[y * bw + 124] for y in range(42, 68)]
+stray = sum(stray_vals) / float(len(stray_vals))
+print("SUBJ_TEST blob head %.3f body %.3f corner %.3f far %.3f stray %.3f" % (head, body, corner, far, stray), flush=True)
+if head < 0.8 or body < 0.7:
+    die("blob not covered")
+if corner > 0.05 or far > 0.05:
+    die("far background selected")
+if stray < 0.12:
+    die("stray hair not partly selected")
+print("SUBJ_TEST blob_ok", flush=True)
+
+res_skin = call(blob, layer, "skin", 2.0)
+print("SUBJ_TEST blob_skin_status", res_skin.index(0), flush=True)
+if status_ok(res_skin):
+    die("skin mode should fail when no face is found")
+if layer_bytes(layer)[2] != before:
+    die("failed skin call changed pixels")
+print("SUBJ_TEST blob_skin_refused", flush=True)
+
+selfie_path = "/workspace/retouch-trial/before.jpg"
+if not os.path.isfile(selfie_path):
+    die("selfie missing")
+img = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(selfie_path))
+slayer = img.get_layers()[0]
+s_before = layer_bytes(slayer)[2]
+res = call(img, slayer, "subject", 2.0)
+print("SUBJ_TEST selfie_status", res.index(0), flush=True)
+if not status_ok(res):
+    die("selfie subject failed")
+if layer_bytes(slayer)[2] != s_before:
+    die("selfie pixels changed")
+sw, sh, ssel = selection_floats(img)
+box = json.load(open("/tmp/face_box.json"))
+bx, by, bw_, bh_ = [int(round(v)) for v in box["box"]]
+face_frac = frac_box(ssel, sw, bx, by, bx + bw_, by + bh_, 0.5)
+hair_frac = frac_box(ssel, sw, bx + int(0.25 * bw_), by, bx + int(0.75 * bw_), by + int(0.18 * bh_), 0.2)
+wood_frac = frac_box(ssel, sw, sw - 70, 1100, sw - 8, 1800, 0.2)
+print("SUBJ_TEST selfie face %.3f hair %.3f wood %.3f" % (face_frac, hair_frac, wood_frac), flush=True)
+if face_frac < 0.7:
+    die("face box mostly unselected")
+if hair_frac < 0.4:
+    die("hair at top of head not selected")
+if wood_frac > 0.15:
+    die("yellow wall selected")
+write_preview("/tmp/subject_preview.ppm", s_before, sw, ssel, sw, (bx, by, bw_, bh_))
+print("SUBJ_TEST selfie_subject_ok", flush=True)
+
+res = call(img, slayer, "skin", 2.0)
+print("SUBJ_TEST skin_status", res.index(0), flush=True)
+if not status_ok(res):
+    die("skin failed")
+if layer_bytes(slayer)[2] != s_before:
+    die("skin changed pixels")
+sw, sh, skin = selection_floats(img)
+re = box["right_eye"]
+le = box["left_eye"]
+nose = box["nose"]
+iod = ((le[0] - re[0]) ** 2 + (le[1] - re[1]) ** 2) ** 0.5
+cr = ((re[0] + nose[0]) / 2.0 - iod * 0.28, (re[1] + nose[1]) / 2.0 + iod * 0.18)
+cl = ((le[0] + nose[0]) / 2.0 + iod * 0.28, (le[1] + nose[1]) / 2.0 + iod * 0.18)
+
+def patch(vals, pt, rad=5):
+    x, y = int(pt[0]), int(pt[1])
+    return mean_box(vals, sw, x - rad, y - rad, x + rad, y + rad)
+
+cheek_r = patch(skin, cr)
+cheek_l = patch(skin, cl)
+eye_r = patch(skin, re, 4)
+eye_l = patch(skin, le, 4)
+hair_s = mean_box(skin, sw, bx + int(0.3 * bw_), by, bx + int(0.7 * bw_), by + int(0.12 * bh_))
+wood_s = mean_box(skin, sw, sw - 70, 1100, sw - 8, 1800)
+print("SUBJ_TEST skin cheekR %.3f cheekL %.3f eyeR %.3f eyeL %.3f hair %.3f wood %.3f" % (
+    cheek_r, cheek_l, eye_r, eye_l, hair_s, wood_s), flush=True)
+if cheek_r < 0.6 or cheek_l < 0.6:
+    die("cheeks not in skin mask")
+if eye_r > 0.25 or eye_l > 0.25:
+    die("eyes still in skin mask")
+if hair_s > 0.2:
+    die("hair in skin mask")
+if wood_s > 0.05:
+    die("wall in skin mask")
+print("SUBJ_TEST skin_ok", flush=True)
+print("SUBJ_TEST ALL_OK", flush=True)

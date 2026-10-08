@@ -1,15 +1,18 @@
-# gimp-retouch-plugins installer for Windows -- UNTESTED (尚未测试 / not manually verified)
+# gimp-retouch-plugins installer for Windows -- tested on Windows 11 + GIMP 3.2.6 (headless, 2026-10-08); GUI dialogs 尚未人工验证
 # Installs OUR plugins (fsep_oneclick, dnb_setup, batch_export) into %APPDATA%\GIMP\<ver>\plug-ins.
 # Third-party plugins: prints the pinned manual steps from bundle.lock (no automatic install on Windows).
-# Usage:  powershell -ExecutionPolicy Bypass -File install.ps1 [-Gimp 3.0|3.2|all] [-Only ours|third-party|all] [-Reinstall] [-DryRun]
+# Usage:  powershell -ExecutionPolicy Bypass -File install.ps1 [-Gimp 3.0|3.2|all] [-Only ours|third-party|all] [-BackupDir D:\gimp-bundle-backups] [-Reinstall] [-DryRun]
+# -Gimp all = every version that already has a profile in %APPDATA%\GIMP; a fresh GIMP (never started) needs -Gimp 3.2 explicitly.
 param(
   [ValidateSet("3.0","3.2","all")][string]$Gimp = "all",
   [ValidateSet("ours","third-party","all")][string]$Only = "all",
+  [string]$BackupDir = (Join-Path $env:USERPROFILE "gimp-bundle-backups"),
   [switch]$Reinstall, [switch]$DryRun
 )
 $ErrorActionPreference = "Stop"
 $Repo = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Vers = if ($Gimp -eq "all") { @("3.0","3.2") } else { @($Gimp) }
+$Vers = if ($Gimp -eq "all") { @("3.0","3.2") | Where-Object { Test-Path (Join-Path $env:APPDATA "GIMP\$_") } } else { @($Gimp) }
+if ($Only -ne "third-party" -and -not $Vers) { [Console]::Error.WriteLine("No GIMP 3.x profile found in $env:APPDATA\GIMP. Start GIMP once, or pass -Gimp 3.0 / -Gimp 3.2."); exit 64 }
 $Ours = @{ "fsep_oneclick" = @("fsep_oneclick\fsep_oneclick.py");
            "dnb_setup"     = @("dnb_setup\dnb_setup.py");
            "batch_export"  = @("batch_export\batch_export.py","batch_export\cli_run.py") }
@@ -23,7 +26,7 @@ foreach ($v in $Vers) {
   $prof = Join-Path $env:APPDATA "GIMP\$v"
   $pd = Join-Path $prof "plug-ins"
   if (Test-Path $prof) {
-    $bk = Join-Path $env:USERPROFILE ("gimp-bundle-backups\gimp-config-$v-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".zip")
+    $bk = Join-Path $BackupDir ("gimp-config-$v-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".zip")
     Do-It "backup $prof -> $bk" { New-Item -ItemType Directory -Force (Split-Path $bk) | Out-Null; Compress-Archive -Path "$prof\*" -DestinationPath $bk }
   }
   if ($Only -ne "third-party") {

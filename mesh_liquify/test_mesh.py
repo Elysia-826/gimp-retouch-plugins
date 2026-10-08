@@ -1,0 +1,343 @@
+# Headless functional test for python-fu-mesh-liquify. Run with python-fu-eval.
+# Generates its own patterns. Prints MESH_TEST lines. Exits by raising on failure.
+import math, os, struct, time
+import gi
+gi.require_version("Gimp", "3.0")
+gi.require_version("Gegl", "0.4")
+from gi.repository import Gimp, Gegl
+
+Gegl.init(None)
+pdb = Gimp.get_pdb()
+
+def die(msg):
+    print("MESH_TEST FAIL " + msg, flush=True)
+    raise SystemExit(1)
+
+def pixels(layer, fmt):
+    w, h = layer.get_width(), layer.get_height()
+    rect = Gegl.Rectangle.new(0, 0, w, h)
+    raw = layer.get_buffer().get(rect, 1.0, fmt, Gegl.AbyssPolicy.NONE)
+    return w, h, bytes(raw)
+
+def paint(layer, fmt, bpp, fn):
+    w, h = layer.get_width(), layer.get_height()
+    buf = bytearray(w * h * bpp)
+    fn(buf, w, h, bpp)
+    rect = Gegl.Rectangle.new(0, 0, w, h)
+    layer.get_buffer().set(rect, fmt, bytes(buf))
+    layer.update(0, 0, w, h)
+    return pixels(layer, fmt)
+
+def new_image(w, h, base, ltype, fmt, bpp, fn):
+    img = Gimp.Image.new(w, h, base)
+    layer = Gimp.Layer.new(img, "test", w, h, ltype, 100.0, Gimp.LayerMode.NORMAL)
+    img.insert_layer(layer, None, 0)
+    before = paint(layer, fmt, bpp, fn)
+    return img, layer, before
+
+def call(img, layer, **kw):
+    proc = pdb.lookup_procedure("python-fu-mesh-liquify")
+    if proc is None:
+        die("procedure missing")
+    cfg = proc.create_config()
+    cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+    cfg.set_property("image", img)
+    cfg.set_core_object_array("drawables", [layer]) if hasattr(cfg, "set_core_object_array") else cfg.set_property("drawables", [layer])
+    for k, v in kw.items():
+        cfg.set_property(k, v)
+    res = proc.run(cfg)
+    st = res.index(0)
+    if st != Gimp.PDBStatusType.SUCCESS:
+        err = res.index(1) if res.length() > 1 else ""
+        die("status %s %s args %s" % (st, err, kw))
+
+def changed(a, b):
+    n = 0
+    # a,b bytes, compare per pixel of bpp
+    if a == b:
+        return 0
+    # count differing pixels assuming bpp from equal length
+    return 1 if a != b else 0
+
+def count_diff(a, b, w, h, bpp, pred):
+    n = 0
+    maxch = 0
+    for y in range(h):
+        for x in range(w):
+            if not pred(x, y):
+                continue
+            i = (y * w + x) * bpp
+            d = 0
+            for c in range(bpp):
+                d = max(d, abs(a[i + c] - b[i + c]))
+            if d:
+                n += 1
+                if d > maxch:
+                    maxch = d
+    return n, maxch
+
+def centroid(raw, w, h, bpp, pred):
+    sx = sy = n = 0
+    for y in range(h):
+        for x in range(w):
+            i = (y * w + x) * bpp
+            if pred(raw, i):
+                sx += x
+                sy += y
+                n += 1
+    if n == 0:
+        return None
+    return sx / n, sy / n, n
+
+def grid_face(buf, w, h, bpp):
+    for y in range(h):
+        for x in range(w):
+            i = (y * w + x) * bpp
+            r = 40 + (x * 3) % 50
+            g = 80 + (y * 5) % 40
+            b = 140
+            # grid lines
+            if x % 20 == 0 or y % 20 == 0:
+                r, g, b = 20, 20, 20
+            # face-like disc
+            dx, dy = x - w * 0.45, y - h * 0.48
+            if dx * dx + dy * dy < (min(w, h) * 0.18) ** 2:
+                r, g, b = 210, 170, 150
+            # red marker just right of center-left, used to measure push
+            if abs(x - 120) <= 2 and abs(y - 100) <= 2:
+                r, g, b = 255, 0, 0
+            buf[i] = r
+            if bpp > 1:
+                buf[i + 1] = g
+            if bpp > 2:
+                buf[i + 2] = b
+            if bpp > 3:
+                buf[i + 3] = 255
+
+print("MESH_TEST proc", pdb.lookup_procedure("python-fu-mesh-liquify") is not None, flush=True)
+
+# --- RGB push ---
+img, layer, (w, h, before) = new_image(
+    240, 180, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, grid_face)
+print("MESH_TEST empty_selection", Gimp.Selection.is_empty(img), flush=True)
+t0 = time.perf_counter()
+call(img, layer, mode="push", x1=120.0, y1=100.0, x2=-1.0, y2=-1.0,
+     radius=50.0, strength=80.0, hardness=0.0, angle=0.0, clockwise=True)
+dt = time.perf_counter() - t0
+_, _, after = pixels(layer, "R'G'B'A u8")
+# outside brush (radius 50 around 120,100) must be identical
+out_n, out_max = count_diff(before, after, w, h, 4, lambda x, y: (x - 120) ** 2 + (y - 100) ** 2 > 52 ** 2)
+in_n, in_max = count_diff(before, after, w, h, 4, lambda x, y: (x - 120) ** 2 + (y - 100) ** 2 <= 48 ** 2)
+c0 = centroid(before, w, h, 4, lambda raw, i: raw[i] > 250 and raw[i + 1] < 5 and raw[i + 2] < 5)
+c1 = centroid(after, w, h, 4, lambda raw, i: raw[i] > 200 and raw[i + 1] < 40 and raw[i + 2] < 40)
+if c0 is None or c1 is None:
+    die("red marker missing c0=%s c1=%s" % (c0, c1))
+shift = c1[0] - c0[0]
+print("MESH_TEST push outside=%d/%d inside=%d maxch=%d shift=%.2f (from %.1f) time=%.2fs" % (
+    out_n, out_max, in_n, in_max, shift, c0[0], dt), flush=True)
+if out_n != 0:
+    die("push changed pixels outside the brush")
+if in_n < 50:
+    die("push moved too few pixels")
+# strength 80, radius 50 => about 20px. Soft brush, marker is at center so ~15-24.
+if shift < 8:
+    die("push shift too small: %.2f" % shift)
+
+# straight stroke push further right, different place
+call(img, layer, mode="push", x1=40.0, y1=40.0, x2=90.0, y2=40.0,
+     radius=18.0, strength=70.0, hardness=0.0, angle=90.0, clockwise=True)
+_, _, after2 = pixels(layer, "R'G'B'A u8")
+# far corner must still match the original (never inside either brush)
+corner = count_diff(before, after2, w, h, 4, lambda x, y: x > 200 and y > 150)
+print("MESH_TEST stroke_corner_diff %d" % corner[0], flush=True)
+if corner[0] != 0:
+    die("stroke touched the far corner")
+seg_n, _ = count_diff(after, after2, w, h, 4, lambda x, y: abs(y - 40) < 16 and 30 < x < 100)
+print("MESH_TEST stroke_moved %d" % seg_n, flush=True)
+if seg_n < 20:
+    die("stroke push did not move pixels along the segment")
+
+# --- bloat then restore ---
+img2, layer2, (w2, h2, b0) = new_image(
+    200, 200, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, grid_face)
+cx, cy, rad = 100.0, 100.0, 60.0
+call(img2, layer2, mode="bloat", x1=cx, y1=cy, x2=-1.0, y2=-1.0,
+     radius=rad, strength=90.0, hardness=0.0, angle=0.0, clockwise=True)
+_, _, b1 = pixels(layer2, "R'G'B'A u8")
+bn, bmax = count_diff(b0, b1, w2, h2, 4, lambda x, y: (x - cx) ** 2 + (y - cy) ** 2 <= 55 ** 2)
+bo, _ = count_diff(b0, b1, w2, h2, 4, lambda x, y: (x - cx) ** 2 + (y - cy) ** 2 > 63 ** 2)
+# a pixel on the ring should move outward: sample the red marker if it is inside, else compare a known grid pixel's movement via mean radius of dark grid? 
+# Use centroid of the face-colored disc... simpler: mean distance from center of pixels that CHANGED is not the metric.
+# Check a single channel ridge: pixel that was unique. We'll measure how far the value at the center moved back on restore.
+center_i = (int(cy) * w2 + int(cx)) * 4
+print("MESH_TEST bloat inside=%d maxch=%d outside=%d center %s -> %s" % (
+    bn, bmax, bo, list(b0[center_i:center_i+4]), list(b1[center_i:center_i+4])), flush=True)
+if bo != 0:
+    die("bloat changed pixels outside the brush")
+if bn < 100:
+    die("bloat moved too few pixels")
+call(img2, layer2, mode="restore", x1=cx, y1=cy, x2=-1.0, y2=-1.0,
+     radius=rad, strength=100.0, hardness=0.0, angle=0.0, clockwise=True)
+_, _, b2 = pixels(layer2, "R'G'B'A u8")
+# center falloff is 1, so center pixel must match the original exactly
+if b2[center_i:center_i+4] != b0[center_i:center_i+4]:
+    die("restore did not return the center pixel: %s vs %s" % (list(b2[center_i:center_i+4]), list(b0[center_i:center_i+4])))
+rn, _ = count_diff(b0, b2, w2, h2, 4, lambda x, y: (x - cx) ** 2 + (y - cy) ** 2 <= 55 ** 2)
+print("MESH_TEST restore remaining_inside=%d (was %d) center_ok=1" % (rn, bn), flush=True)
+if rn >= bn:
+    die("restore did not reduce the difference")
+
+# marker on a gradient: bloat moves it outward, restore brings it back
+def grad(buf, w, h, bpp):
+    for y in range(h):
+        for x in range(w):
+            i = (y * w + x) * bpp
+            buf[i] = x % 256
+            buf[i+1] = y % 256
+            buf[i+2] = 30
+            buf[i+3] = 255
+            if abs(x - 130) <= 2 and abs(y - 100) <= 2:
+                buf[i], buf[i+1], buf[i+2] = 255, 0, 0
+
+imgm, laym, (wm, hm, m0) = new_image(
+    200, 200, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, grad)
+def redc(raw):
+    return centroid(raw, wm, hm, 4, lambda b, i: b[i] > 240 and b[i+1] < 20 and b[i+2] < 20)
+call(imgm, laym, mode="bloat", x1=100.0, y1=100.0, x2=-1.0, y2=-1.0,
+     radius=70.0, strength=90.0, hardness=0.0, angle=0.0, clockwise=True)
+_, _, m1 = pixels(laym, "R'G'B'A u8")
+call(imgm, laym, mode="restore", x1=100.0, y1=100.0, x2=-1.0, y2=-1.0,
+     radius=70.0, strength=100.0, hardness=0.0, angle=0.0, clockwise=True)
+_, _, m2 = pixels(laym, "R'G'B'A u8")
+c0, c1, c2 = redc(m0), redc(m1), redc(m2)
+print("MESH_TEST marker %s -> bloat %s -> restore %s" % (c0, c1, c2), flush=True)
+if not c0 or not c1 or not c2:
+    die("marker missing")
+outward = c1[0] - c0[0]
+back = c2[0] - c0[0]
+print("MESH_TEST bloat_shift=%.2f restore_shift=%.2f" % (outward, back), flush=True)
+if outward < 4:
+    die("bloat did not move marker outward")
+if abs(back) > abs(outward) * 0.6:
+    die("restore did not bring marker back")
+mo, _ = count_diff(m0, m1, wm, hm, 4, lambda x, y: (x-100)**2+(y-100)**2 > 74**2)
+if mo != 0:
+    die("marker bloat touched outside")
+imgm.delete()
+
+# pinch and twirl just have to move something and spare the outside
+for mode, extra in (("pinch", {}), ("twirl", {"clockwise": False})):
+    im, ly, (ww, hh, src) = new_image(
+        160, 160, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, grid_face)
+    call(im, ly, mode=mode, x1=80.0, y1=80.0, x2=-1.0, y2=-1.0,
+         radius=40.0, strength=80.0, hardness=0.2, angle=0.0, clockwise=extra.get("clockwise", True))
+    _, _, dst = pixels(ly, "R'G'B'A u8")
+    inn, _ = count_diff(src, dst, ww, hh, 4, lambda x, y: (x-80)**2+(y-80)**2 <= 36**2)
+    out, _ = count_diff(src, dst, ww, hh, 4, lambda x, y: (x-80)**2+(y-80)**2 > 43**2)
+    print("MESH_TEST %s inside=%d outside=%d" % (mode, inn, out), flush=True)
+    if out != 0 or inn < 30:
+        die("%s failed inside=%d outside=%d" % (mode, inn, out))
+    im.delete()
+
+# --- selection: right half protected ---
+img3, layer3, (w3, h3, s0) = new_image(
+    180, 120, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, grid_face)
+img3.select_rectangle(Gimp.ChannelOps.REPLACE, 0, 0, 90, 120)
+print("MESH_TEST selection_empty", Gimp.Selection.is_empty(img3), flush=True)
+call(img3, layer3, mode="push", x1=80.0, y1=60.0, x2=-1.0, y2=-1.0,
+     radius=40.0, strength=100.0, hardness=0.0, angle=0.0, clockwise=True)
+_, _, s1 = pixels(layer3, "R'G'B'A u8")
+# x>=90 is outside the selection (rectangle is [0,90)). Allow 1px edge ambiguity, check x>=94
+prot, _ = count_diff(s0, s1, w3, h3, 4, lambda x, y: x >= 94)
+left, _ = count_diff(s0, s1, w3, h3, 4, lambda x, y: x <= 70 and abs(y-60) < 30)
+print("MESH_TEST selection protected=%d moved_left=%d" % (prot, left), flush=True)
+if prot != 0:
+    die("selection did not protect the right side")
+if left < 10:
+    die("selection blocked the whole brush")
+img3.delete()
+
+# --- grayscale, no alpha ---
+def gray_paint(buf, w, h, bpp):
+    for y in range(h):
+        for x in range(w):
+            buf[(y * w + x) * bpp] = (x * 2 + y) % 256
+img4, layer4, (w4, h4, g0) = new_image(
+    100, 80, Gimp.ImageBaseType.GRAY, Gimp.ImageType.GRAY_IMAGE, "Y' u8", 1, gray_paint)
+call(img4, layer4, mode="bloat", x1=40.0, y1=40.0, x2=-1.0, y2=-1.0,
+     radius=24.0, strength=80.0, hardness=0.0, angle=0.0, clockwise=True)
+_, _, g1 = pixels(layer4, "Y' u8")
+gn, _ = count_diff(g0, g1, w4, h4, 1, lambda x, y: True)
+go, _ = count_diff(g0, g1, w4, h4, 1, lambda x, y: (x-40)**2+(y-40)**2 > 27**2)
+print("MESH_TEST gray changed=%d outside=%d" % (gn, go), flush=True)
+if gn < 10 or go != 0:
+    die("grayscale failed")
+img4.delete()
+
+# --- alpha: transparent corner stays, semi-transparent blob moves ---
+def alpha_paint(buf, w, h, bpp):
+    for y in range(h):
+        for x in range(w):
+            i = (y * w + x) * bpp
+            buf[i:i+3] = b"\x10\x80\xc0"
+            buf[i+3] = 0
+            if abs(x - 50) <= 3 and abs(y - 50) <= 3:
+                buf[i:i+3] = b"\xff\x20\x20"
+                buf[i+3] = 140
+img5, layer5, (w5, h5, a0) = new_image(
+    120, 120, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, alpha_paint)
+call(img5, layer5, mode="push", x1=50.0, y1=50.0, x2=-1.0, y2=-1.0,
+     radius=30.0, strength=80.0, hardness=0.0, angle=0.0, clockwise=True)
+_, _, a1 = pixels(layer5, "R'G'B'A u8")
+# corner alpha must stay 0
+if a1[3] != 0 or a1[(10 * w5 + 10) * 4 + 3] != 0:
+    die("alpha corner changed")
+c_a0 = centroid(a0, w5, h5, 4, lambda raw, i: raw[i+3] > 100)
+c_a1 = centroid(a1, w5, h5, 4, lambda raw, i: raw[i+3] > 80)
+print("MESH_TEST alpha centroid %s -> %s" % (c_a0, c_a1), flush=True)
+if c_a0 is None or c_a1 is None or c_a1[0] <= c_a0[0] + 2:
+    die("alpha blob did not move right")
+img5.delete()
+
+# --- 2000px timing (long side) ---
+def big_paint(buf, w, h, bpp):
+    for y in range(0, h, 4):
+        for x in range(w):
+            i = (y * w + x) * bpp
+            buf[i] = x % 251
+            buf[i+1] = y % 251
+            buf[i+2] = 80
+            buf[i+3] = 255
+    # fill the skipped rows cheaply
+    for y in range(h):
+        if y % 4 == 0:
+            continue
+        src = ((y - y % 4) * w) * bpp
+        dst = (y * w) * bpp
+        buf[dst:dst + w * bpp] = buf[src:src + w * bpp]
+img6, layer6, _ = new_image(
+    2000, 1400, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, big_paint)
+t0 = time.perf_counter()
+call(img6, layer6, mode="bloat", x1=1000.0, y1=700.0, x2=-1.0, y2=-1.0,
+     radius=400.0, strength=50.0, hardness=0.0, angle=0.0, clockwise=True)
+dt = time.perf_counter() - t0
+print("MESH_TEST big2000 seconds=%.2f" % dt, flush=True)
+if dt > 60:
+    die("2000px bloat too slow: %.1fs" % dt)
+img6.delete()
+
+# hidden state group exists on the first image and is not visible
+names = []
+def dump(ls, ind=0):
+    for l in ls:
+        names.append((ind, l.get_name(), l.get_visible()))
+        if l.is_group():
+            dump(l.get_children(), ind+1)
+dump(img.get_layers())
+print("MESH_TEST layers", names, flush=True)
+if not any((not vis) and "Liquify State" in n for _, n, vis in names):
+    die("hidden state group missing")
+
+img.delete()
+img2.delete()
+print("MESH_TEST OK", flush=True)

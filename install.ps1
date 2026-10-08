@@ -1,6 +1,6 @@
 # gimp-retouch-plugins installer for Windows -- tested on Windows 11 + GIMP 3.2.6 (headless, 2026-10-08); GUI dialogs 尚未人工验证
 # Installs the components YOU choose into %APPDATA%\GIMP\<ver>\ (user profile only, no admin needed):
-#   ours:        fsep_oneclick, dnb_setup, batch_export            (files from this repo)
+#   ours:        fsep_oneclick, dnb_setup, batch_export, mesh_liquify (files from this repo)
 #   third-party: gmic, resynthesizer, batcher, adjustment-layer    (downloaded, sha256-checked)
 #   opt-in:      photogimp  (overwrites layout/shortcuts/tool presets; keeps your language/theme/icon gimprc settings)
 # Usage:
@@ -31,6 +31,7 @@ $C = [ordered]@{
   "fsep_oneclick"   = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("fsep_oneclick\fsep_oneclick.py"); procs=@("python-fu-fsep-oneclick") }
   "dnb_setup"       = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("dnb_setup\dnb_setup.py"); procs=@("python-fu-dnb-setup") }
   "batch_export"    = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("batch_export\batch_export.py","batch_export\cli_run.py"); procs=@("python-fu-batch-export") }
+  "mesh_liquify"    = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("mesh_liquify\mesh_liquify.py"); procs=@("python-fu-mesh-liquify") }
   "gmic"            = @{ kind="zip"; gimp="3.2"; ver="4.0.5"; file="gmic_4.0.5_gimp3.2_win64.zip"
                          url="https://gmic.eu/files/windows/gmic_4.0.5_gimp3.2_win64.zip"
                          sha="739bc467de3f6e61f85d827f5444339268145f4b3aaddbdb834b1e3b2ce7a950"; dirs=@("gmic_gimp_qt"); procs=@("plug-in-gmic-qt")
@@ -51,7 +52,7 @@ $C = [ordered]@{
                          sha="beab281ed1281219bb0b994df4e66e8ff107e54dad943644d077205a325c7d99"; procs=@()
                          note="opt-in; overwrites layout/shortcuts/tool presets; keeps gimprc keys: language, theme, icons, import-raw-plug-in" }
 }
-$Sets = @{ "ours"=@("fsep_oneclick","dnb_setup","batch_export"); "third-party"=@("gmic","resynthesizer","batcher","adjustment-layer") }
+$Sets = @{ "ours"=@("fsep_oneclick","dnb_setup","batch_export","mesh_liquify"); "third-party"=@("gmic","resynthesizer","batcher","adjustment-layer") }
 $Sets["all"] = $Sets["ours"] + $Sets["third-party"]
 
 if ($List) {

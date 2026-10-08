@@ -8,3 +8,4 @@ resynthesizer
 batcher
 adjustment-layer
 rawtherapee
+mesh_liquify

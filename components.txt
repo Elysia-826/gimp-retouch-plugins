@@ -3,6 +3,7 @@
 fsep_oneclick    |ours       |-          |resynthesizer|linux,windows|n|一键频率分离：生成低频/高频图层组，用于磨皮修瑕
 dnb_setup        |ours       |-          |-            |linux,windows|n|一键加深减淡搭建：50% 灰柔光层 + 观察层
 batch_export     |ours       |-          |-            |linux,windows|n|批量导出 JPEG/WebP/PNG（缩放、锐化、sRGB、水印），可命令行调用；与 batcher 功能部分重叠
+mesh_liquify     |ours       |-          |-            |linux,windows|n|柔和网格液化：推移/膨胀/收缩/旋转/还原，边缘平滑收干净（尚未人工验证）
 raw2tiff         |ours       |rawtherapee|batch_export |linux        |n|RAW 批量转 16 位 TIFF（rawtherapee-cli），安装为 ~/.local/bin/raw2tiff
 gmic             |third-party|-          |-            |linux        |n|G'MIC-Qt 滤镜合集（3.0 用 .deb，3.2 用 Flathub 扩展 + ICU77 包装）
 resynthesizer    |third-party|-          |-            |linux        |n|Resynthesizer 修复选区/纹理合成（3.0 源码编译 v3.0，3.2 用 Flathub 扩展）

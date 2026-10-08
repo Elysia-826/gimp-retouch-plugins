@@ -523,4 +523,102 @@ if wa > wb + 1.5:
 if ha < hb * 0.75:
     die("skin texture high-pass dropped (%.3f vs %.3f)" % (ha, hb))
 
+
+def call_named(name, img, layer, **kw):
+    proc = pdb.lookup_procedure(name)
+    if proc is None:
+        die("procedure missing " + name)
+    cfg = proc.create_config()
+    cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+    cfg.set_property("image", img)
+    cfg.set_core_object_array("drawables", [layer]) if hasattr(cfg, "set_core_object_array") else cfg.set_property("drawables", [layer])
+    for k, v in kw.items():
+        cfg.set_property(k, v)
+    res = proc.run(cfg)
+    st = res.index(0)
+    if st != Gimp.PDBStatusType.SUCCESS:
+        err = res.index(1) if res.length() > 1 else ""
+        die("status %s %s %s" % (name, st, err))
+
+def _stroke_named(img):
+    for l in img.get_layers():
+        if l.get_name() == "液化笔触":
+            return l
+    return None
+
+def _paint_bar(layer, x0, x1, y0, y1):
+    w, h = layer.get_width(), layer.get_height()
+    raw = bytearray(layer.get_buffer().get(Gegl.Rectangle.new(0, 0, w, h), 1.0, "R'G'B'A u8", Gegl.AbyssPolicy.NONE))
+    xa, xb = min(x0, x1), max(x0, x1)
+    ya, yb = min(y0, y1), max(y0, y1)
+    for y in range(max(0, ya), min(h, yb + 1)):
+        for x in range(max(0, xa), min(w, xb + 1)):
+            i = (y * w + x) * 4
+            raw[i:i + 4] = b"\xff\xff\xff\xff"
+    layer.get_buffer().set(Gegl.Rectangle.new(0, 0, w, h), "R'G'B'A u8", bytes(raw))
+    layer.update(0, 0, w, h)
+
+# prepare: transparent layer, no liquify state yet
+imgb, layb, _ = new_image(
+    180, 110, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, grid_face)
+call_named("python-fu-mesh-liquify-stroke-layer", imgb, layb)
+stlay = _stroke_named(imgb)
+if stlay is None:
+    die("stroke layer was not created")
+groups = [l for l in imgb.get_layers() if l.is_group() and "Liquify" in l.get_name()]
+alpha = bytes(stlay.get_buffer().get(Gegl.Rectangle.new(10, 10, 1, 1), 1.0, "R'G'B'A u8", Gegl.AbyssPolicy.NONE))
+sel = imgb.get_selected_layers()
+print("MESH_TEST stroke_prepare name=%s alpha=%s groups=%d selected=%s" % (
+    stlay.get_name(), list(alpha), len(groups), sel[0].get_name() if sel else None), flush=True)
+if list(alpha) != [0, 0, 0, 0] or groups or not sel or sel[0] != stlay:
+    die("stroke prepare layer is wrong")
+call_named("python-fu-mesh-liquify-stroke-layer", imgb, layb)
+if sum(1 for l in imgb.get_layers() if l.get_name() == "液化笔触") != 1:
+    die("second prepare created a duplicate stroke layer")
+
+# horizontal painted stroke pushes a marker to the right
+_paint_bar(stlay, 30, 150, 98, 102)
+call(imgb, layb, mode="push", path="layer", **{"stroke-layer": stlay},
+     x1=-1.0, y1=-1.0, x2=-1.0, y2=-1.0,
+     radius=26.0, strength=80.0, hardness=0.0, angle=90.0, clockwise=True)
+_, _, sb = pixels(layb, "R'G'B'A u8")
+# grid_face marker starts at x=120, y=100, on the painted horizontal stroke.
+c1 = centroid(sb, 180, 110, 4, lambda raw, i: raw[i] > 200 and raw[i + 1] < 40 and raw[i + 2] < 40)
+print("MESH_TEST stroke_push marker=%s hidden=%s still=%s" % (
+    c1, (not stlay.get_visible()), _stroke_named(imgb) is not None), flush=True)
+if c1 is None or c1[0] < 126:
+    die("painted stroke did not push the marker right: %s" % (c1,))
+if stlay.get_visible() or _stroke_named(imgb) is None:
+    die("stroke layer should stay and be hidden")
+state_ok = any(l.is_group() and (not l.get_visible()) and "Liquify" in l.get_name() for l in imgb.get_layers())
+if not state_ok:
+    die("liquify state group missing or visible after stroke push")
+imgb.delete()
+
+# vertical stroke pushes down; freeze on the lower part stays put
+imgv, layv, (wv, hv, v0) = new_image(
+    160, 140, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, grid_face)
+call_named("python-fu-mesh-liquify-stroke-layer", imgv, layv)
+stv = _stroke_named(imgv)
+_paint_bar(stv, 78, 82, 20, 120)
+frv = Gimp.Layer.new(imgv, "冻结", wv, hv, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
+imgv.insert_layer(frv, None, 0)
+frv.get_buffer().set(Gegl.Rectangle.new(0, 0, wv, hv), "R'G'B'A u8", bytes([0, 0, 0, 255]) * (wv * hv))
+frv.get_buffer().set(Gegl.Rectangle.new(0, 100, wv, hv - 100), "R'G'B'A u8", bytes([255, 255, 255, 255]) * (wv * (hv - 100)))
+frv.update(0, 0, wv, hv)
+Gimp.Selection.none(imgv)
+call(imgv, layv, mode="push", path="layer", **{"stroke-layer": stv, "freeze": "layer", "freeze-layer": frv, "freeze-feather": 8.0},
+     x1=-1.0, y1=-1.0, x2=-1.0, y2=-1.0,
+     radius=22.0, strength=80.0, hardness=0.0, angle=0.0, clockwise=True)
+_, _, v1 = pixels(layv, "R'G'B'A u8")
+fz, fzmax = count_diff(v0, v1, wv, hv, 4, lambda x, y: y >= 100)
+moved, _ = count_diff(v0, v1, wv, hv, 4, lambda x, y: y <= 70 and abs(x - 80) <= 18)
+print("MESH_TEST stroke_freeze frozen=%d/%d moved=%d stroke_hidden=%s freeze_hidden=%s" % (
+    fz, fzmax, moved, (not stv.get_visible()), (not frv.get_visible())), flush=True)
+if fz != 0 or moved < 10:
+    die("stroke+freeze failed")
+if stv.get_visible() or frv.get_visible():
+    die("stroke or freeze layer stayed visible")
+imgv.delete()
+
 print("MESH_TEST OK", flush=True)

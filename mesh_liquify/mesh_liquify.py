@@ -11,6 +11,8 @@ gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
 PROC = "python-fu-mesh-liquify"
+PROC_STROKE = "python-fu-mesh-liquify-stroke-layer"
+STROKE_NAME = "液化笔触"
 KEY = "mesh-liquify-key"       # shared id on the paint layer and the state group
 ROLE = "mesh-liquify-role"     # "original" on the hidden snapshot layer
 DISP = "mesh-liquify-disp"     # native-endian mesh blob on the paint layer
@@ -433,8 +435,213 @@ def _clean_edges(mesh, src, gate, gx, gy, gw, gh):
                     a[j] = 0.0
                     a[j + 1] = 0.0
 
+
+def _closest_poly(px, py, segs, r2):
+    """Distance and unit tangent of the nearest polyline segment, or None."""
+    best = r2
+    bestd = None
+    bx = by = 0.0
+    for x1, y1, vx, vy, L2, ux, uy in segs:
+        if L2 < 1e-8:
+            dx, dy = px - x1, py - y1
+        else:
+            t = ((px - x1) * vx + (py - y1) * vy) / L2
+            if t < 0.0:
+                t = 0.0
+            elif t > 1.0:
+                t = 1.0
+            dx = px - (x1 + t * vx)
+            dy = py - (y1 + t * vy)
+        d2 = dx * dx + dy * dy
+        if d2 < best:
+            best = d2
+            bestd = math.sqrt(d2) if d2 > 0.0 else 0.0
+            bx, by = ux, uy
+    if bestd is None:
+        return None
+    return bestd, bx, by
+
+def _thin(m, w, h):
+    """Zhang-Suen thinning. m is a mutable 0/1 bytearray, row-major."""
+    def at(x, y):
+        if x < 0 or y < 0 or x >= w or y >= h:
+            return 0
+        return m[y * w + x]
+    for _pass in range(48):
+        changed = False
+        for step in (0, 1):
+            kill = []
+            for y in range(1, h - 1):
+                row = y * w
+                for x in range(1, w - 1):
+                    if not m[row + x]:
+                        continue
+                    p2 = at(x, y - 1); p3 = at(x + 1, y - 1); p4 = at(x + 1, y)
+                    p5 = at(x + 1, y + 1); p6 = at(x, y + 1); p7 = at(x - 1, y + 1)
+                    p8 = at(x - 1, y); p9 = at(x - 1, y - 1)
+                    B = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9
+                    if B < 2 or B > 6:
+                        continue
+                    seq = (p2, p3, p4, p5, p6, p7, p8, p9, p2)
+                    A = 0
+                    for i in range(8):
+                        if seq[i] == 0 and seq[i + 1] == 1:
+                            A += 1
+                    if A != 1:
+                        continue
+                    if step == 0:
+                        if p2 and p4 and p6:
+                            continue
+                        if p4 and p6 and p8:
+                            continue
+                    else:
+                        if p2 and p4 and p8:
+                            continue
+                        if p2 and p6 and p8:
+                            continue
+                    kill.append(row + x)
+            if kill:
+                changed = True
+                for i in kill:
+                    m[i] = 0
+        if not changed:
+            break
+
+_N8 = ((1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1))
+
+def _walk_skeleton(mask, w, h):
+    """Longest 8-connected path. Starts at the upper-left endpoint so a
+    left-to-right stroke pushes right (paint order is not stored)."""
+    def nbs(x, y):
+        out = []
+        for dx, dy in _N8:
+            xx, yy = x + dx, y + dy
+            if 0 <= xx < w and 0 <= yy < h and mask[yy * w + xx]:
+                out.append((xx, yy))
+        return out
+    pts = [(x, y) for y in range(h) for x in range(w) if mask[y * w + x]]
+    if not pts:
+        return []
+    ends = [p for p in pts if len(nbs(*p)) <= 1]
+    if not ends:
+        ends = [min(pts)]
+    def walk(start):
+        path = [start]
+        seen = {start}
+        prev = None
+        cur = start
+        while True:
+            opts = [p for p in nbs(*cur) if p not in seen]
+            if not opts:
+                break
+            if prev is None or len(opts) == 1:
+                nxt = opts[0]
+            else:
+                vx, vy = cur[0] - prev[0], cur[1] - prev[1]
+                nxt = max(opts, key=lambda p: (p[0] - cur[0]) * vx + (p[1] - cur[1]) * vy)
+            path.append(nxt)
+            seen.add(nxt)
+            prev, cur = cur, nxt
+        return path
+    best = []
+    for e in ends:
+        path = walk(e)
+        if len(path) > len(best):
+            best = path
+    # Prefer the end that is upper-left as the start.
+    if len(best) >= 2 and best[-1] < best[0]:
+        best.reverse()
+    step = 3
+    out = best[::step]
+    if out[-1] != best[-1]:
+        out.append(best[-1])
+    return out
+
+def _trace_stroke(stroke, paint):
+    """Centerline of a painted stroke, in paint-layer pixels."""
+    w, h = stroke.get_width(), stroke.get_height()
+    if w < 2 or h < 2:
+        raise RuntimeError("Stroke layer is empty / 笔触图层是空的")
+    if w * h > 6000 * 6000:
+        raise RuntimeError("Stroke layer is too large / 笔触图层太大")
+    buf = stroke.get_buffer()
+    ext = buf.get_extent()
+    raw = _bytes(buf.get(Gegl.Rectangle.new(ext.x, ext.y, w, h), 1.0, "R'G'B'A u8", Gegl.AbyssPolicy.NONE))
+    if len(raw) != w * h * 4:
+        raise RuntimeError("Cannot read the stroke layer / 读不到笔触图层")
+    ink = bytearray(w * h)
+    nink = 0
+    x0 = y0 = 10 ** 9
+    x1 = y1 = -1
+    for y in range(h):
+        row = y * w
+        base = row * 4
+        for x in range(w):
+            if raw[base + x * 4 + 3] > 40:
+                ink[row + x] = 1
+                nink += 1
+                if x < x0: x0 = x
+                if y < y0: y0 = y
+                if x > x1: x1 = x
+                if y > y1: y1 = y
+    if nink < 2:
+        raise RuntimeError("Paint a stroke on the layer first (transparent layer, GIMP brush) / 请先在透明的「液化笔触」图层上用画笔画一条线")
+    if nink > w * h * 0.35:
+        raise RuntimeError("The stroke layer is mostly filled. Paint a line on a transparent layer / 这个图层几乎铺满了，请在透明图层上画一条线")
+    bw, bh = x1 - x0 + 1, y1 - y0 + 1
+    # One empty pixel of padding so the stroke is not stuck to the array
+    # border (thinning never edits the outer row, and would then do nothing).
+    pw, ph = bw + 2, bh + 2
+    sub = bytearray(pw * ph)
+    for y in range(bh):
+        src = (y + y0) * w + x0
+        dst = (y + 1) * pw + 1
+        sub[dst:dst + bw] = ink[src:src + bw]
+    _thin(sub, pw, ph)
+    sk = [(x - 1, y - 1) for x, y in _walk_skeleton(sub, pw, ph)]
+    if len(sk) < 2:
+        raise RuntimeError("Could not follow the stroke / 没能顺着这条笔触走下来")
+    _ok, sox, soy = stroke.get_offsets()
+    _ok, pox, poy = paint.get_offsets()
+    dx, dy = sox - pox, soy - poy
+    return [(x0 + x + dx, y0 + y + dy) for x, y in sk]
+
+def _find_stroke_layer(layers):
+    for layer in layers:
+        if layer.is_group():
+            if _pstr(layer, KEY):
+                continue
+            found = _find_stroke_layer(layer.get_children())
+            if found is not None:
+                return found
+        elif layer.get_name() == STROKE_NAME:
+            return layer
+    return None
+
+def prepare_stroke_layer(image, layer):
+    """Add (or reveal) a transparent layer the user paints with GIMP's brush."""
+    if layer is not None and layer.is_group():
+        raise RuntimeError("Select a normal layer first / 请先选中普通图层")
+    existing = _find_stroke_layer(image.get_layers())
+    image.undo_group_start()
+    try:
+        if existing is not None:
+            existing.set_visible(True)
+            image.set_selected_layers([existing])
+            return
+        w, h = image.get_width(), image.get_height()
+        sl = Gimp.Layer.new(image, STROKE_NAME, w, h, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
+        if not image.insert_layer(sl, None, 0):
+            raise RuntimeError("Could not add the stroke layer / 加不上液化笔触图层")
+        sl.get_buffer().set(Gegl.Rectangle.new(0, 0, w, h), "R'G'B'A u8", bytes(w * h * 4))
+        sl.update(0, 0, w, h)
+        image.set_selected_layers([sl])
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+
 def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise, weights, wx, wy, ww, wh,
-           freeze_src=None, freeze_feather=0.0, layer=None, sample=None):
+           freeze_src=None, freeze_feather=0.0, layer=None, sample=None, poly=None):
     """Add one soft brush to the mesh. Returns True if any sample was visited."""
     r = float(radius)
     if r < 1.0:
@@ -444,9 +651,15 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
         return False
     if mode == "restore" and mesh.bw == 0:
         return False
-    use_seg = (mode == "push" and x2 >= 0.0 and y2 >= 0.0
+    use_poly = mode == "push" and poly is not None and len(poly) >= 2
+    use_seg = (not use_poly and mode == "push" and x2 >= 0.0 and y2 >= 0.0
                and (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1) >= 0.25)
-    if use_seg:
+    if use_poly:
+        minx = min(p[0] for p in poly)
+        maxx = max(p[0] for p in poly)
+        miny = min(p[1] for p in poly)
+        maxy = max(p[1] for p in poly)
+    elif use_seg:
         minx, maxx = min(x1, x2), max(x1, x2)
         miny, maxy = min(y1, y2), max(y1, y2)
     else:
@@ -480,6 +693,19 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
     inner = max(0.0, min(0.95, float(hardness))) * r
     span = max(1e-6, r - inner)
     r2 = r * r
+    segs = []
+    if use_poly:
+        for i in range(len(poly) - 1):
+            sx1, sy1 = poly[i]
+            sx2, sy2 = poly[i + 1]
+            svx, svy = sx2 - sx1, sy2 - sy1
+            sL2 = svx * svx + svy * svy
+            if sL2 < 1e-8:
+                continue
+            sL = math.sqrt(sL2)
+            segs.append((sx1, sy1, svx, svy, sL2, svx / sL, svy / sL))
+        if not segs:
+            return False
     if mode == "push":
         amount = tstr * r * AMOUNT["push"]
         if use_seg:
@@ -517,7 +743,14 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
             else:
                 wsel = 1.0
             px = x + 0.5
-            if mode == "push" and use_seg:
+            pdirx = pdiry = 0.0
+            if use_poly:
+                hit = _closest_poly(px, py, segs, r2)
+                if hit is None:
+                    continue
+                d, pdirx, pdiry = hit
+                d2 = d * d
+            elif mode == "push" and use_seg:
                 tt = ((px - x1) * vx + (py - y1) * vy) / L2
                 if tt < 0.0:
                     tt = 0.0
@@ -528,10 +761,11 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
             else:
                 ddx = px - x1
                 ddy = py - y1
-            d2 = ddx * ddx + ddy * ddy
+            if not use_poly:
+                d2 = ddx * ddx + ddy * ddy
+                d = math.sqrt(d2) if d2 > 0.0 else 0.0
             if d2 >= r2:
                 continue
-            d = math.sqrt(d2) if d2 > 0.0 else 0.0
             f = _falloff(d, r, inner, span) * wsel
             g = 1.0
             if gate is not None:
@@ -559,8 +793,12 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
                 if abs(a[i + 1]) < 1e-4:
                     a[i + 1] = 0.0
             elif mode == "push":
-                a[i] += dirx * amount * f
-                a[i + 1] += diry * amount * f
+                if use_poly:
+                    a[i] += pdirx * amount * f
+                    a[i + 1] += pdiry * amount * f
+                else:
+                    a[i] += dirx * amount * f
+                    a[i + 1] += diry * amount * f
             elif mode == "twirl":
                 # tangential, 0 at the center (no pinch singularity)
                 s = amount * f / r
@@ -624,7 +862,7 @@ def _render(orig, layer, mesh):
     layer.update(0, 0, layer.get_width(), layer.get_height())
 
 def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise,
-            freeze_mode="none", freeze_layer=None, freeze_feather=0.0):
+            freeze_mode="none", freeze_layer=None, freeze_feather=0.0, stroke_layer=None):
     if layer.is_group() or _pstr(layer, ROLE) == "original":
         raise RuntimeError("Choose a normal paint layer, not the hidden liquify snapshot or a group / 请选择普通图层")
     if layer.get_lock_content():
@@ -650,6 +888,15 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
             if freeze_layer == layer or _pstr(freeze_layer, ROLE) == "original":
                 raise RuntimeError("Freeze layer must be a different layer / 冻结图层不能是正在修的图层或原始像素")
             freeze_src = freeze_layer
+    poly = None
+    if stroke_layer is not None:
+        if mode != "push":
+            raise RuntimeError("A painted stroke is push only / 笔触图层只能用来推移")
+        if stroke_layer == layer or _pstr(stroke_layer, ROLE) == "original":
+            raise RuntimeError("Stroke layer must be a different layer / 笔触图层不能是正在修的图层")
+        if freeze_layer is not None and stroke_layer == freeze_layer:
+            raise RuntimeError("Stroke layer and freeze layer must be different / 笔触图层和冻结图层要分开")
+        poly = _trace_stroke(stroke_layer, layer)
     if x1 < 0.0 or y1 < 0.0:
         x1 = bx + bw / 2.0
         y1 = by + bh / 2.0
@@ -663,7 +910,7 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
     t0 = time.perf_counter()
     sample = orig if orig is not None else layer
     touched = deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise,
-                     weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample)
+                     weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample, poly)
     if not touched:
         return
     image.undo_group_start()
@@ -675,6 +922,9 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
         # A visible freeze layer would cover the photo. Keep it, just hide it.
         if freeze_mode == "layer" and freeze_layer is not None:
             freeze_layer.set_visible(False)
+        # The painted stroke would cover the photo. Keep the layer, just hide it.
+        if stroke_layer is not None:
+            stroke_layer.set_visible(False)
         image.set_selected_layers([layer])
     finally:
         image.undo_group_end()
@@ -697,7 +947,7 @@ def run(procedure, run_mode, image, drawables, config, data):
     if run_mode == Gimp.RunMode.INTERACTIVE:
         GimpUi.init(PROC)
         dlg = GimpUi.ProcedureDialog.new(procedure, config, "柔和液化 / Soft Mesh Liquify")
-        dlg.fill(["mode", "radius", "strength", "hardness", "x1", "y1", "x2", "y2", "angle", "clockwise",
+        dlg.fill(["mode", "path", "stroke-layer", "radius", "strength", "hardness", "x1", "y1", "x2", "y2", "angle", "clockwise",
                   "freeze", "freeze-layer", "freeze-feather"])
         ok = dlg.run()
         dlg.destroy()
@@ -706,25 +956,60 @@ def run(procedure, run_mode, image, drawables, config, data):
     try:
         fr_i = config.get_choice_id("freeze")
         fr_mode = ("none", "layer", "selection")[fr_i] if 0 <= fr_i <= 2 else "none"
+        path_i = config.get_choice_id("path")
+        stroke = config.get_property("stroke-layer") if path_i == 1 else None
+        if path_i == 1 and stroke is None:
+            raise RuntimeError("Pick the painted stroke layer / 请选择画好的「液化笔触」图层")
         liquify(image, drawables[0], _mode(config),
                 config.get_property("x1"), config.get_property("y1"),
                 config.get_property("x2"), config.get_property("y2"),
                 config.get_property("radius"), config.get_property("strength"),
                 config.get_property("hardness"), config.get_property("angle"),
                 config.get_property("clockwise"),
-                fr_mode, config.get_property("freeze-layer"), config.get_property("freeze-feather"))
+                fr_mode, config.get_property("freeze-layer"), config.get_property("freeze-feather"),
+                stroke)
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
+
+def run_prepare_stroke(procedure, run_mode, image, drawables, config, data):
+    if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
+        return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
+            GLib.Error("Select exactly one layer / 请选择一个图层"))
+    try:
+        prepare_stroke_layer(image, drawables[0])
+    except Exception as e:
+        return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
+
 
 class MeshLiquify(Gimp.PlugIn):
     def do_set_i18n(self, name):
         return False
 
     def do_query_procedures(self):
-        return [PROC]
+        return [PROC, PROC_STROKE]
 
     def do_create_procedure(self, name):
+        if name == PROC_STROKE:
+            return self._make_stroke_proc(name)
+        return self._make_liquify_proc(name)
+
+    def _make_stroke_proc(self, name):
+        p = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run_prepare_stroke, None)
+        p.set_image_types("RGB*, GRAY*")
+        p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
+        p.set_menu_label("准备液化笔触 / Prepare Liquify Stroke")
+        p.add_menu_path("<Image>/Filters/修图工具/")
+        p.set_documentation(
+            "Add a transparent layer named 液化笔触. Paint on it with GIMP's brush, then run 柔和液化 and choose that layer as the stroke. 准备一张透明图层，用 GIMP 自己的画笔在上面画。",
+            "Does not liquify by itself. The filter dialog cannot receive mouse drags on the photo, so the stroke is painted with GIMP's normal brush. "
+            "If the layer already exists it is shown and selected instead of creating another. The hidden 液化状态 group is not touched.",
+            name)
+        p.set_attribution("Elysia", "Elysia", "2026")
+        return p
+
+    def _make_liquify_proc(self, name):
         F = GObject.ParamFlags.READWRITE
         p = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run, None)
         p.set_image_types("RGB*, GRAY*")
@@ -739,7 +1024,9 @@ class MeshLiquify(Gimp.PlugIn):
             "x2/y2 < 0 means a single dab (push then uses angle). Respects an existing selection. "
             "Freeze (冻结): a separate layer where white pixels never move, or turn the current selection into a freeze. "
             "Near a freeze edge, free pixels ease to zero so the mesh does not tear. Frozen pixels themselves stay put. The freeze layer is hidden after use; unhide it if you want to edit the mask. "
-            "A strong contrast edge is moved as one piece, so a steep displacement does not stretch it into a wide ramp. Skin away from that edge is not blurred.",
+            "A strong contrast edge is moved as one piece, so a steep displacement does not stretch it into a wide ramp. Skin away from that edge is not blurred. "
+            "This dialog cannot paint on the photo. To follow a brush stroke: run '准备液化笔触', paint with GIMP's own brush on that transparent layer, then run this filter with stroke source set to that layer. "
+            "The stroke is hidden afterwards (not deleted). Direction is left-to-right, or top-to-bottom for a vertical stroke, not the order the pen moved.",
             name)
         p.set_attribution("Elysia", "Elysia", "2026")
         ch = Gimp.Choice.new()
@@ -749,6 +1036,15 @@ class MeshLiquify(Gimp.PlugIn):
         ch.add("restore", 3, "Restore / 还原", "Ease the mesh back toward the original")
         ch.add("twirl", 4, "Twirl / 旋转", "Rotate pixels around the center")
         p.add_choice_argument("mode", "Mode / 模式", None, ch, "push", F)
+        src = Gimp.Choice.new()
+        src.add("line", 0, "Coordinates / 坐标直线", "One dab or one straight stroke from the numbers. The dialog cannot drag on the photo. 对话框里不能在照片上拖。")
+        src.add("layer", 1, "Painted stroke layer / 液化笔触图层", "Follow a line painted with GIMP's brush. Run 准备液化笔触 first. 先准备图层，用 GIMP 画笔画线。")
+        p.add_choice_argument("path", "Stroke source / 笔触来源",
+                              "Coordinates, or a layer you painted with GIMP's own brush. This dialog does not paint on the canvas.",
+                              src, "line", F)
+        p.add_drawable_argument("stroke-layer", "Stroke layer / 液化笔触图层",
+                                "The layer you painted. Hidden after this push, not deleted. Direction follows the line from its upper-left end, not the order you painted. 用完会隐藏，不删除。方向从左往右（竖线从上往下），不是落笔先后。",
+                                True, F)
         p.add_double_argument("radius", "Brush radius px / 笔刷半径", "Soft falloff reaches zero at this radius",
                               1.0, 4000.0, 80.0, F)
         p.add_double_argument("strength", "Strength / 强度 (0-100)",

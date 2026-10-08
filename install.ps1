@@ -104,18 +104,18 @@ function Fetch($d) {
   $f = Join-Path $CacheDir $d.file
   if ((Sha $f) -eq $d.sha) { Write-Host "    cached $($d.file) (sha256 ok)"; return $f }
   New-Item -ItemType Directory -Force $CacheDir | Out-Null
+  if ((Sha "$f.part") -eq $d.sha) { Move-Item -Force "$f.part" $f; return $f }   # finished earlier, not yet renamed
   $urls = if ($d.urls) { @($d.urls) } else { @($d.url) }
   $curl = Get-Command curl.exe -ErrorAction SilentlyContinue; $why = @()
   foreach ($u in $urls) {
     Write-Host "    download $u"
-    Remove-Item -Force "$f.part" -ErrorAction SilentlyContinue
-    try {
-      if ($curl) { & $curl.Source -fL --retry 2 --connect-timeout 20 -o "$f.part" $u; if ($LASTEXITCODE -ne 0) { throw "curl $LASTEXITCODE" } }
+    try {   # same file on every mirror, so a partial .part is resumed (-C -); the sha256 check below catches anything wrong
+      if ($curl) { & $curl.Source -fL --retry 4 --retry-all-errors --retry-delay 3 -C - --connect-timeout 20 --speed-limit 2048 --speed-time 60 -o "$f.part" $u; if ($LASTEXITCODE -ne 0) { throw "curl $LASTEXITCODE" } }
       else { Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile "$f.part" }
-    } catch { $why += "$u ($($_.Exception.Message))"; continue }
+    } catch { $why += "$u ($($_.Exception.Message))"; if ((Sha "$f.part") -eq $d.sha) { Move-Item -Force "$f.part" $f; return $f }; Remove-Item -Force "$f.part" -ErrorAction SilentlyContinue; continue }
     $h = Sha "$f.part"
     if ($h -eq $d.sha) { Move-Item -Force "$f.part" $f; return $f }
-    $why += "$u (sha256 mismatch: got $h)"
+    $why += "$u (sha256 mismatch: got $h)"; Remove-Item -Force "$f.part" -ErrorAction SilentlyContinue
   }
   Remove-Item -Force "$f.part" -ErrorAction SilentlyContinue
   throw "download failed for $($d.file): $($why -join '; ') -- put the file (sha256 $($d.sha)) into $CacheDir yourself and re-run"
@@ -127,7 +127,7 @@ function Wheel-Urls($p) {   # same /packages/... path on PyPI and its mirrors
           if ($u) { $tail = ([uri]$u.url).AbsolutePath -replace '^.*?/packages/', ''; break } } catch { }
   }
   $out = @()
-  if ($tail) { $out += "https://files.pythonhosted.org/packages/$tail", "https://mirrors.aliyun.com/pypi/packages/$tail", "https://pypi.tuna.tsinghua.edu.cn/packages/$tail" }
+  if ($tail) { $out += "https://mirrors.aliyun.com/pypi/packages/$tail", "https://pypi.tuna.tsinghua.edu.cn/packages/$tail", "https://files.pythonhosted.org/packages/$tail" }
   foreach ($idx in "https://mirrors.aliyun.com/pypi/simple", "https://pypi.tuna.tsinghua.edu.cn/simple") {   # PyPI JSON blocked: read the simple index
     try { $h = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 -Uri "$idx/$($p.pypi)/").Content
           $m = [regex]::Match($h, 'href="([^"#]*' + [regex]::Escape($p.file) + ')')

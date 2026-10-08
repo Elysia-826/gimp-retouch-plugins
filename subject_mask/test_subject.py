@@ -184,6 +184,63 @@ if bite < 0.75:
     die("window-side hair bite is back")
 if wood_block > 0.08:
     die("wood block got selected")
+
+
+def kind_frac(x0, y0, x1, y1, kind, thresh=0.5):
+    """Selected share of pixels in a box that look like wood or like hair."""
+    x1 = min(x1, sw)
+    y1 = min(y1, sh)
+    n = 0
+    hit = 0
+    for y in range(y0, y1):
+        row = y * sw
+        for x in range(x0, x1):
+            i = (row + x) * 3
+            r, g, b = s_before[i], s_before[i + 1], s_before[i + 2]
+            mx = max(r, g, b)
+            ch = mx - min(r, g, b)
+            gy = 0.299 * r + 0.587 * g + 0.114 * b
+            if kind == "wood":
+                # Wood here is saturated orange-yellow; shadowed skin is redder
+                # and less saturated relative to its brightness.
+                ok = r > b + 70 and g > b + 35 and ch > 0.5 * mx
+            else:
+                ok = gy < 135 and ch < 38
+            if not ok:
+                continue
+            n += 1
+            if ssel[row + x] > thresh:
+                hit += 1
+    return hit / float(n or 1), n
+
+
+regions = [
+    ("left_shoulder", 0, 2736, 837, 3300),
+    ("left_clothes", 0, 2736, 837, 4608),
+    ("right_clothes", 1239, 2736, 2076, 4608),
+    ("left_hair_box", 0, 420, 480, 1430),
+    ("wood1_box", 1880, 720, 2076, 1860),
+    ("wood2_box", 1600, 2320, 1752, 2710),
+    ("ear_box", 1752, 1860, 1958, 2316),
+]
+vals = {}
+for name, x0, y0, x1, y1 in regions:
+    vals[name] = frac_box(ssel, sw, x0, y0, min(x1, sw), min(y1, sh), 0.5)
+    print("SUBJ_TEST region %s %.3f" % (name, vals[name]), flush=True)
+with open("/tmp/subject_sel_v3.pgm", "wb") as f:
+    f.write(("P5\n%d %d\n255\n" % (sw, sh)).encode("ascii"))
+    f.write(bytes(int(max(0.0, min(1.0, v)) * 255 + 0.5) for v in ssel))
+lh, lhn = kind_frac(0, 420, 480, 1430, "hair")
+w1, w1n = kind_frac(1880, 720, 2076, 1860, "wood")
+w2, w2n = kind_frac(1600, 2320, 1752, 2710, "wood")
+print("SUBJ_TEST hairlike_in_left_hair %.3f (n=%d) woodlike_in_wood1 %.3f (n=%d) woodlike_in_wood2 %.3f (n=%d)" % (
+    lh, lhn, w1, w1n, w2, w2n), flush=True)
+if vals["left_clothes"] < 0.85 or vals["left_shoulder"] < 0.85:
+    die("left shoulder or clothes missing")
+if lh < 0.8:
+    die("left outer hair missing")
+if w1 > 0.1 or w2 > 0.1:
+    die("wood selected")
 if hair_frac < 0.4:
     die("hair at top of head not selected")
 # The far-right strip beside the head is hair on this selfie, not the wood.
@@ -206,10 +263,10 @@ for oy in range(out_h):
         raw[o] = r
         raw[o + 1] = g
         raw[o + 2] = b
-with open("/tmp/subject_preview2.ppm", "wb") as f:
+with open("/tmp/subject_preview3.ppm", "wb") as f:
     f.write(("P6\n%d %d\n255\n" % (out_w, out_h)).encode("ascii"))
     f.write(raw)
-print("SUBJ_TEST preview2 /tmp/subject_preview2.ppm %dx%d" % (out_w, out_h), flush=True)
+print("SUBJ_TEST preview3 /tmp/subject_preview3.ppm %dx%d" % (out_w, out_h), flush=True)
 print("SUBJ_TEST selfie_subject_ok", flush=True)
 
 res = call(img, slayer, "skin", 2.0)

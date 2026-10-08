@@ -89,6 +89,144 @@ def _grow(seed, allow, radius):
     return grown
 
 
+def _fill_enclosed(mask):
+    """Fill background pockets that do not reach any image border."""
+    import cv2
+    bg = (mask < 128).astype(np.uint8)
+    n, labels = cv2.connectedComponents(bg, connectivity=4)
+    if n <= 1:
+        return mask
+    border = np.unique(np.concatenate(
+        [labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]]))
+    reach = np.isin(labels, border[border > 0])
+    out = mask.copy()
+    out[(bg > 0) & ~reach] = 255
+    return out
+
+
+def _person_grabcut(small, face, sx, sy):
+    """GrabCut seeded from the face. Returns a 0/255 mask at the small size.
+
+    Nothing is forced to background except the top rows above the hair and
+    narrow side strips at cheek height, so a shoulder that touches the frame
+    edge or clothes in shadow are not thrown away by a fixed box.
+    """
+    import cv2
+    sh, sw = small.shape[:2]
+    bx, by, bw, bh = face["box"]
+    nose = face.get("nose") or [bx + 0.5 * bw, by + 0.55 * bh]
+    g = np.full((sh, sw), cv2.GC_PR_BGD, np.uint8)
+    cxf = bx + 0.5 * bw
+    px1 = max(0, int((cxf - 0.85 * bw) * sx))
+    px2 = min(sw, int((cxf + 0.85 * bw) * sx))
+    py1 = max(0, int((by - 0.25 * bh) * sy))
+    g[py1:, px1:px2] = cv2.GC_PR_FGD
+    g[min(sh, int((by + bh) * sy)):, :] = cv2.GC_PR_FGD
+    top = int((by - 0.30 * bh) * sy)
+    if top > 0:
+        g[:top, :] = cv2.GC_BGD
+    ey = int((by + 0.35 * bh) * sy)
+    cy2 = int((by + 0.85 * bh) * sy)
+    strip = max(2, int(0.03 * sw))
+    if (bx - 0.08 * bw) * sx > strip:
+        g[ey:cy2, :strip] = cv2.GC_BGD
+    if (bx + 1.08 * bw) * sx < sw - strip:
+        g[ey:cy2, sw - strip:] = cv2.GC_BGD
+    cx = int(float(nose[0]) * sx)
+    cy = int(float(nose[1]) * sy)
+    cv2.ellipse(g, (cx, cy),
+                (max(3, int(bw * 0.28 * sx)), max(3, int(bh * 0.22 * sy))),
+                0, 0, 360, cv2.GC_FGD, -1)
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    chroma = small.max(axis=2).astype(np.int16) - small.min(axis=2).astype(np.int16)
+    hz = np.zeros(gray.shape, bool)
+    hz[max(0, int((by + 0.02 * bh) * sy)):max(0, int((by + 0.28 * bh) * sy)),
+       max(0, int((bx + 0.25 * bw) * sx)):min(sw, int((bx + 0.75 * bw) * sx))] = True
+    g[hz & (gray < 70) & (chroma < 35)] = cv2.GC_FGD
+    tx1 = max(0, int((bx + 0.40 * bw) * sx))
+    tx2 = min(sw, int((bx + 0.60 * bw) * sx))
+    ty1 = int((by + 1.02 * bh) * sy)
+    if tx2 > tx1 and ty1 < sh - 1:
+        g[ty1:sh - 1, tx1:tx2] = cv2.GC_FGD
+    # A tight crop can leave no background label at all; GrabCut needs some.
+    if int(((g == cv2.GC_BGD) | (g == cv2.GC_PR_BGD)).sum()) < 50:
+        edge_rows = max(2, int(0.02 * sh))
+        cut = max(edge_rows, min(sh, int((by + 0.35 * bh) * sy)))
+        for rows, cols in ((slice(0, edge_rows), slice(0, sw)),
+                           (slice(0, cut), slice(0, 2)),
+                           (slice(0, cut), slice(sw - 2, sw))):
+            sub = g[rows, cols]
+            sub[sub != cv2.GC_FGD] = cv2.GC_PR_BGD
+    bgd = np.zeros((1, 65), np.float64)
+    fgd = np.zeros((1, 65), np.float64)
+    cv2.grabCut(small, g, None, bgd, fgd, 6, cv2.GC_INIT_WITH_MASK)
+    fg = np.where((g == cv2.GC_FGD) | (g == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
+    n, labels = cv2.connectedComponents(fg)
+    cy = min(sh - 1, max(0, cy))
+    cx = min(sw - 1, max(0, cx))
+    keep = labels[cy, cx]
+    if keep == 0:
+        return fg
+    return np.where(labels == keep, 255, 0).astype(np.uint8)
+
+
+def _ear_zones(mid, fg, face, s):
+    """Ears sit just outside the face box. Add pixels there that touch the
+    head and clearly differ from the background seen in the same rows.
+    Returns the added mask (0/255)."""
+    import cv2
+    mh, mw = fg.shape
+    bx, by, bw, bh = face["box"]
+    re = face.get("right_eye")
+    le = face.get("left_eye")
+    mr = face.get("mouth_right")
+    ml = face.get("mouth_left")
+    if not (re and le and mr and ml):
+        return np.zeros_like(fg)
+    lab = cv2.cvtColor(mid, cv2.COLOR_BGR2LAB).astype(np.float32)
+    ey = min(re[1], le[1])
+    my = max(mr[1], ml[1])
+    zy1 = max(0, int(ey * s))
+    zy2 = min(mh, int((my + 0.05 * bh) * s))
+    step = max(4, int(0.05 * bh * s))
+    added = np.zeros_like(fg)
+    touch = cv2.dilate(fg, np.ones((3, 3), np.uint8))
+    for side in (0, 1):
+        if side == 0:
+            zx1, zx2 = bx - 0.16 * bw, bx + 0.04 * bw
+        else:
+            zx1, zx2 = bx + bw - 0.04 * bw, bx + bw + 0.16 * bw
+        zx1 = max(0, int(zx1 * s))
+        zx2 = min(mw, int(zx2 * s))
+        if zx2 - zx1 < 4 or zy2 - zy1 < 4:
+            continue
+        cols = slice(0, (zx1 + zx2) // 2) if side == 0 else slice((zx1 + zx2) // 2, mw)
+        cand = np.zeros(fg.shape, bool)
+        for y0 in range(zy1, zy2, step):
+            y1 = min(zy2, y0 + step)
+            rows = slice(max(0, y0 - step), min(mh, y1 + step))
+            bgpx = lab[rows, cols][fg[rows, cols] == 0]
+            if len(bgpx) < 20:
+                continue
+            ref = np.median(bgpx, axis=0)
+            spread = np.median(np.abs(bgpx - ref), axis=0)
+            dl = lab[y0:y1, zx1:zx2] - ref
+            # Lightness counts less: an ear in shadow is darker, but so is
+            # wood in shadow. Hue and yellowness separate them better.
+            d = np.sqrt((0.35 * dl[:, :, 0]) ** 2 + dl[:, :, 1] ** 2 + dl[:, :, 2] ** 2)
+            thr = max(8.0, 3.0 * float(np.hypot(spread[1], spread[2])))
+            cand[y0:y1, zx1:zx2] = d > thr
+        cand = (cand & (fg == 0)).astype(np.uint8) * 255
+        cand = cv2.morphologyEx(
+            cand, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+        n, labels = cv2.connectedComponents(cand)
+        for i in range(1, n):
+            comp = labels == i
+            if (touch[comp] > 0).any():
+                added[comp] = 255
+    return added
+
+
 def _subject_from_face(img, face):
     import cv2
     # GrabCut samples its color model at random. Pin it so one photo stays stable.
@@ -96,134 +234,47 @@ def _subject_from_face(img, face):
     h, w = img.shape[:2]
     small, _ = _resize_long(img, 800)
     sh, sw = small.shape[:2]
-    sx = sw / float(w)
-    sy = sh / float(h)
+    fg_small = _person_grabcut(small, face, sw / float(w), sh / float(h))
+
+    # Refine at a larger working size so edges are not 6 px stairs.
+    mid, _ = _resize_long(img, 1600)
+    mh, mw = mid.shape[:2]
+    s = mw / float(w)
+    fg = (cv2.resize(fg_small, (mw, mh), interpolation=cv2.INTER_LINEAR) > 127).astype(np.uint8) * 255
     bx, by, bw, bh = face["box"]
-    nose = face.get("nose")
-    # The old rectangle ended at the chin, so everything below it was forced
-    # background. Keep the frame from above the hair down to the bottom edge.
-    y_top = max(2, int((by - 0.28 * bh) * sy))
-    gmask = np.full((sh, sw), cv2.GC_BGD, np.uint8)
-    gmask[y_top:sh - 2, 2:sw - 2] = cv2.GC_PR_BGD
-    if nose is not None:
-        cx = int(float(nose[0]) * sx)
-        cy = int(float(nose[1]) * sy)
-    else:
-        cx = int((bx + 0.5 * bw) * sx)
-        cy = int((by + 0.55 * bh) * sy)
-    cv2.ellipse(
-        gmask, (cx, cy),
-        (max(3, int(bw * 0.22 * sx)), max(3, int(bh * 0.16 * sy))),
-        0, 0, 360, cv2.GC_FGD, -1)
-    gray_s = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-    hy1 = max(0, int((by + 0.02 * bh) * sy))
-    hy2 = min(sh, int((by + 0.30 * bh) * sy))
-    hx1 = max(0, int((bx + 0.25 * bw) * sx))
-    hx2 = min(sw, int((bx + 0.75 * bw) * sx))
-    hair_zone = np.zeros(gray_s.shape, bool)
-    hair_zone[hy1:hy2, hx1:hx2] = True
-    gmask[hair_zone & (gray_s < 62)] = cv2.GC_FGD
-    tx1 = max(2, int((bx + 0.38 * bw) * sx))
-    tx2 = min(sw - 2, int((bx + 0.62 * bw) * sx))
-    ty1 = min(sh - 4, int((by + 0.92 * bh) * sy))
-    if tx2 > tx1 and ty1 < sh - 3:
-        gmask[ty1:sh - 3, tx1:tx2] = cv2.GC_FGD
-    bb, gg, rr = cv2.split(small)
-    yellow = (rr.astype(np.int16) > gg.astype(np.int16) + 18) & (
-        rr.astype(np.int16) > bb.astype(np.int16) + 45)
-    wood_zone = np.zeros(gray_s.shape, bool)
-    wy1 = min(sh - 2, int((by + 0.45 * bh) * sy))
-    wx1 = min(sw - 2, int((bx + 0.92 * bw) * sx))
-    wood_zone[wy1:sh - 2, wx1:sw - 2] = True
-    gmask[yellow & wood_zone] = cv2.GC_BGD
-    gmask[0:2, :] = cv2.GC_BGD
-    gmask[-2:, :] = cv2.GC_BGD
-    gmask[:, 0:2] = cv2.GC_BGD
-    gmask[:, -2:] = cv2.GC_BGD
-    bgd = np.zeros((1, 65), np.float64)
-    fgd = np.zeros((1, 65), np.float64)
-    cv2.grabCut(small, gmask, None, bgd, fgd, 5, cv2.GC_INIT_WITH_MASK)
-    fg = np.where((gmask == cv2.GC_FGD) | (gmask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
-    fg = _fill_holes(fg)
-    full = cv2.resize(fg, (w, h), interpolation=cv2.INTER_NEAREST)
 
-    # Dark hair touching the head, within about 120 px. Not a strand matte.
-    # Strong color (yellow wood, bright window) is not hair.
-    y1 = max(0, int(by - 0.28 * bh))
-    y2 = min(h, int(by + 0.50 * bh))
-    if y2 > y1 + 4:
-        crop = full[y1:y2].copy()
-        bgr = img[y1:y2]
-        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-        chroma = bgr.max(axis=2).astype(np.int16) - bgr.min(axis=2).astype(np.int16)
-        allow = (((gray < 108) & (chroma < 58)) | (crop > 200)).astype(np.uint8) * 255
-        seed = (crop > 200).astype(np.uint8) * 255
-        grown = _grow(seed, allow, 120)
-        inv = np.where(crop > 200, 0, 255).astype(np.uint8)
-        dist = cv2.distanceTransform(inv, cv2.DIST_L2, 3)
-        added = (grown > 0) & (crop < 40) & (dist > 0) & (dist <= 120)
-        crop[added] = 235
-        closed = cv2.morphologyEx(
-            (crop > 80).astype(np.uint8) * 255, cv2.MORPH_CLOSE,
-            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
-        closed[gray > 150] = 0
-        crop[(closed > 0) & (crop < 40)] = 220
-        edge = cv2.GaussianBlur(crop, (0, 0), 1.1)
-        crop = np.maximum(crop, edge)
-        crop[crop < 16] = 0
-        full[y1:y2] = np.maximum(full[y1:y2], crop)
+    # Hair: dark, nearly neutral pixels connected to the head, above the
+    # mouth line. Lit gray hair against a bright wall is included; wood in
+    # shadow is too colored to pass. This is a color fill, not a strand matte.
+    gray = cv2.cvtColor(mid, cv2.COLOR_BGR2GRAY)
+    chroma = mid.max(axis=2).astype(np.int16) - mid.min(axis=2).astype(np.int16)
+    band = np.zeros(fg.shape, bool)
+    band[:max(0, min(mh, int((by + 0.55 * bh) * s))), :] = True
+    allow = (((gray < 135) & (chroma < 38) & band) | (fg > 0)).astype(np.uint8) * 255
+    fg = _grow(fg, allow, 160)
 
-    # Clothes below the chin. Grow through shirt-colored pixels, then close
-    # thin gaps so the torso is one region instead of a field of holes.
-    chin = min(h - 8, int(by + 0.90 * bh))
-    if chin < h - 8 and (full[chin:] > 200).any():
-        samples = []
-        for fx, fy in (
-            (0.50, 80), (0.42, 400), (0.58, 400), (0.36, 800), (0.64, 800),
-        ):
-            x = min(w - 2, max(0, int(bx + fx * bw)))
-            y = min(h - 2, chin + fy)
-            samples.append(img[y, x].astype(np.float32))
-        samples = np.stack(samples, 0)
-        wall = np.median(img[chin:h - 2, 0:max(8, w // 30)].reshape(-1, 3), 0).astype(np.float32)
-        low = img[chin:].astype(np.float32)
-        d_shirt = np.min(
-            np.linalg.norm(low[:, :, None, :] - samples[None, None, :, :], axis=3),
-            axis=2)
-        d_wall = np.linalg.norm(low - wall, axis=2)
-        rr = low[:, :, 2]
-        gg = low[:, :, 1]
-        bb = low[:, :, 0]
-        yellow_full = (rr > gg + 18) & (rr > bb + 45)
-        far_right = np.zeros(yellow_full.shape, bool)
-        far_right[:, int(bx + 0.95 * bw):] = True
-        ok = (d_shirt < 64) & (d_shirt + 6 < d_wall) & ~(yellow_full & far_right)
-        allow = np.where(ok | (full[chin:] > 200), 255, 0).astype(np.uint8)
-        seed = (full[chin:] > 200).astype(np.uint8) * 255
-        grown = _grow(seed, allow, max(w, h - chin))
-        full[chin:][(grown > 0) & (full[chin:] < 40)] = 230
-        # Bridge thin holes inside the clothes. Only shirt-like pixels may fill in.
-        binary = (full[chin:] > 40).astype(np.uint8) * 255
-        bridged = cv2.morphologyEx(
-            binary, cv2.MORPH_CLOSE,
-            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31)))
-        near_shirt = (d_shirt < 80) & (d_shirt < d_wall + 12) & ~(yellow_full & far_right)
-        full[chin:][(bridged > 0) & (full[chin:] < 40) & near_shirt] = 230
-    full = _fill_holes(full)
-    # A hole-fill must not paint the yellow wood back in.
-    if h > 8 and w > 8:
-        bgr = img
-        rr = bgr[:, :, 2].astype(np.int16)
-        gg = bgr[:, :, 1].astype(np.int16)
-        bb = bgr[:, :, 0].astype(np.int16)
-        yellow = (rr > gg + 18) & (rr > bb + 45)
-        right = np.zeros((h, w), bool)
-        right[:, int(bx + 0.95 * bw):] = True
-        below = np.zeros((h, w), bool)
-        below[int(by + 0.45 * bh):, :] = True
-        full[yellow & right & below] = 0
+    ears = _ear_zones(mid, fg, face, s)
+    fg = np.maximum(fg, ears)
+
+    # Snap the boundary to the strongest nearby color edge.
+    r = max(2, int(0.0025 * max(mh, mw)))
+    ke = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    sure_fg = cv2.erode(fg, ke)
+    sure_fg = np.maximum(sure_fg, cv2.erode(ears, np.ones((3, 3), np.uint8)))
+    sure_bg = cv2.erode(255 - fg, ke)
+    markers = np.zeros((mh, mw), np.int32)
+    markers[sure_bg > 0] = 1
+    markers[sure_fg > 0] = 2
+    cv2.watershed(mid, markers)
+    out = np.where(markers == 2, 255, 0).astype(np.uint8)
+    edge = markers == -1
+    out[edge] = fg[edge]
+    out = cv2.medianBlur(out, 5)
+    out = _fill_enclosed(out)
+    # Smooth upscale; the plugin adds its own small feather on top.
+    full = cv2.resize(out, (w, h), interpolation=cv2.INTER_LINEAR)
+    full = cv2.GaussianBlur(full, (0, 0), 0.8)
     return full
-
 
 
 def _subject_from_border(img):

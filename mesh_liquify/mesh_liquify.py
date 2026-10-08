@@ -3,8 +3,8 @@
 # 柔和网格液化 / Soft mesh liquify  (GIMP 3.0.x and 3.2.x)
 # Displacement is accumulated on a mesh and re-rendered from a hidden copy of
 # the original pixels (gegl:map-relative). No numpy: the mesh is pure Python,
-# the pixel resample is GEGL. Face-aware controls are not in this version.
-import array, base64, math, os, struct, sys, time, uuid, gi
+# the pixel resample is GEGL. Face sliders use the same mesh.
+import array, base64, json, math, os, struct, subprocess, sys, tempfile, time, uuid, gi
 gi.require_version('Gimp', '3.0')
 gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
@@ -14,6 +14,7 @@ PROC = "python-fu-mesh-liquify"
 PROC_STROKE = "python-fu-mesh-liquify-stroke-layer"
 PROC_UNDO = "python-fu-mesh-liquify-undo"
 PROC_REDO = "python-fu-mesh-liquify-redo"
+PROC_FACE = "python-fu-mesh-liquify-face"
 STROKE_NAME = "液化笔触"
 KEY = "mesh-liquify-key"       # shared id on the paint layer and the state group
 ROLE = "mesh-liquify-role"     # "original" on the hidden snapshot layer
@@ -1029,6 +1030,281 @@ def _mode(config):
         return MODES[i]
     return "push"
 
+def _face_from_box(x, y, w, h):
+    """Landmarks from a rough box. Not a detector: proportions only."""
+    return {
+        "box": (float(x), float(y), float(w), float(h)),
+        "right_eye": (x + 0.33 * w, y + 0.40 * h),
+        "left_eye": (x + 0.67 * w, y + 0.40 * h),
+        "nose": (x + 0.50 * w, y + 0.57 * h),
+        "mouth_right": (x + 0.36 * w, y + 0.72 * h),
+        "mouth_left": (x + 0.64 * w, y + 0.72 * h),
+        "score": None,
+        "manual": True,
+    }
+
+def _jaw_ends(face):
+    x, y, w, h = face["box"]
+    ml, mr = face["mouth_left"], face["mouth_right"]
+    mouth_y = (ml[1] + mr[1]) * 0.5
+    bottom = y + h
+    jy = mouth_y + 0.35 * max(8.0, bottom - mouth_y)
+    jy = min(y + h * 0.88, max(y + h * 0.62, jy))
+    return (x + 0.22 * w, jy), (x + 0.78 * w, jy)
+
+def _dump_face(face, eye, jaw, nose):
+    try:
+        payload = {
+            "manual": bool(face.get("manual")),
+            "score": face.get("score"),
+            "box": list(face["box"]),
+            "right_eye": list(face["right_eye"]),
+            "left_eye": list(face["left_eye"]),
+            "nose": list(face["nose"]),
+            "mouth_right": list(face["mouth_right"]),
+            "mouth_left": list(face["mouth_left"]),
+            "jaw": [list(p) for p in _jaw_ends(face)],
+            "eye": eye, "jaw_slider": jaw, "nose_slider": nose,
+        }
+        with open("/tmp/mesh-liquify-face-last.json", "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except Exception:
+        pass
+
+def _cv2_launcher():
+    """A python that can import cv2. Flatpak GIMP does not have it; the host one does."""
+    homes = []
+    for key in ("HOME",):
+        if os.environ.get(key):
+            homes.append(os.environ[key])
+    homes.append(os.path.expanduser("~"))
+    sites = [""]
+    seen = set()
+    for home in homes:
+        local = os.path.join(home, ".local", "lib")
+        if not os.path.isdir(local):
+            continue
+        for name in sorted(os.listdir(local)):
+            sp = os.path.join(local, name, "site-packages")
+            if os.path.isdir(sp) and sp not in seen:
+                seen.add(sp)
+                sites.append(sp)
+    pythons = []
+    for cand in ("/usr/bin/python3", "/run/host/usr/bin/python3"):
+        if os.path.exists(cand):
+            pythons.append(cand)
+    for py in pythons:
+        for sp in sites:
+            env = os.environ.copy()
+            if sp:
+                env["PYTHONPATH"] = sp + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+            try:
+                r = subprocess.run([py, "-c", "import cv2"], capture_output=True, env=env, timeout=30)
+            except Exception:
+                continue
+            if r.returncode == 0:
+                return py, env
+    return None, None
+
+def _export_ppm(layer, path):
+    w, h = layer.get_width(), layer.get_height()
+    buf = layer.get_buffer()
+    ext = buf.get_extent()
+    rect = Gegl.Rectangle.new(ext.x, ext.y, w, h)
+    raw = _bytes(buf.get(rect, 1.0, "R'G'B' u8", Gegl.AbyssPolicy.NONE))
+    if len(raw) != w * h * 3:
+        raw4 = _bytes(buf.get(rect, 1.0, "R'G'B'A u8", Gegl.AbyssPolicy.NONE))
+        if len(raw4) != w * h * 4:
+            raise RuntimeError("Cannot read the layer / 读不到图层像素")
+        rgb = bytearray(w * h * 3)
+        for i in range(w * h):
+            rgb[i * 3:i * 3 + 3] = raw4[i * 4:i * 4 + 3]
+        raw = bytes(rgb)
+    with open(path, "wb") as f:
+        f.write(("P6\n%d %d\n255\n" % (w, h)).encode("ascii"))
+        f.write(raw)
+
+def _detect_face(layer):
+    here = os.path.dirname(os.path.abspath(__file__))
+    model = os.path.join(here, "face_detection_yunet_2023mar.onnx")
+    script = os.path.join(here, "face_detect.py")
+    if not os.path.isfile(model) or not os.path.isfile(script):
+        raise RuntimeError("找不到认脸用的小模型。画面没有改动。 / Face model is missing. Nothing was changed.")
+    py, env = _cv2_launcher()
+    if py is None:
+        raise RuntimeError("自动认脸需要本机 Python 里的 OpenCV（cv2），现在没有。请改用「手动画框」。画面没有改动。 / OpenCV is not available. Use the manual box. Nothing was changed.")
+    fd, ppm = tempfile.mkstemp(prefix="mesh-liquify-face-", suffix=".ppm")
+    os.close(fd)
+    try:
+        _export_ppm(layer, ppm)
+        r = subprocess.run([py, script, model, ppm], capture_output=True, text=True, env=env, timeout=90)
+    finally:
+        try:
+            os.remove(ppm)
+        except OSError:
+            pass
+    line = ""
+    for part in (r.stdout or "").splitlines():
+        if part.startswith("{"):
+            line = part
+    if not line:
+        raise RuntimeError("认脸没有返回结果。画面没有改动。 / Face detection returned nothing. Nothing was changed.")
+    info = json.loads(line)
+    if not info.get("ok"):
+        err = info.get("error")
+        if err == "no-cv2":
+            raise RuntimeError("自动认脸需要本机的 OpenCV（cv2）。画面没有改动。 / OpenCV is missing. Nothing was changed.")
+        raise RuntimeError("没有找到脸，画面没有改动。 / No face found, nothing was changed.")
+    box = info["box"]
+    return {
+        "box": tuple(box),
+        "right_eye": tuple(info["right_eye"]),
+        "left_eye": tuple(info["left_eye"]),
+        "nose": tuple(info["nose"]),
+        "mouth_right": tuple(info["mouth_right"]),
+        "mouth_left": tuple(info["mouth_left"]),
+        "score": info.get("score"),
+        "manual": False,
+    }
+
+def _edit_limits(image, layer, freeze_mode, freeze_layer):
+    w, h = layer.get_width(), layer.get_height()
+    freeze_src = None
+    if freeze_mode == "selection":
+        if Gimp.Selection.is_empty(image):
+            raise RuntimeError("No selection to turn into a freeze / 没有选区，没法冻结")
+        return None, 0, 0, w, h, image.get_selection()
+    hit, bx, by, bw, bh = layer.mask_intersect()
+    if not hit or bw <= 0 or bh <= 0:
+        return "empty", 0, 0, 0, 0, None
+    weights = _weights(image, layer, bx, by, bw, bh)
+    if freeze_mode == "layer":
+        if freeze_layer is None:
+            raise RuntimeError("Pick a freeze layer (white = frozen) / 请选择冻结图层，白色为冻住")
+        if freeze_layer == layer or _pstr(freeze_layer, ROLE) == "original":
+            raise RuntimeError("Freeze layer must be a different layer / 冻结图层不能是正在修的图层或原始像素")
+        freeze_src = freeze_layer
+    return weights, bx, by, bw, bh, freeze_src
+
+def _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample):
+    touched = False
+    def dab(mode, x, y, radius, strength, angle=0.0):
+        nonlocal touched
+        if strength <= 0.0 or radius < 1.0:
+            return
+        if deform(mesh, mode, x, y, -1.0, -1.0, radius, strength, 0.0, angle, True,
+                  weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample, None, False):
+            touched = True
+    inter = abs(face["left_eye"][0] - face["right_eye"][0])
+    eye_r = max(8.0, 0.16 * inter)
+    if abs(eye) >= 0.05:
+        mode = "bloat" if eye > 0.0 else "pinch"
+        for key in ("right_eye", "left_eye"):
+            dab(mode, face[key][0], face[key][1], eye_r, abs(eye))
+    if abs(jaw) >= 0.05:
+        left, right = _jaw_ends(face)
+        box_w = face["box"][2]
+        jaw_r = max(14.0, 0.18 * box_w)
+        # Positive narrows: image-left jaw pushes right, image-right jaw pushes left.
+        if jaw > 0.0:
+            a_left, a_right = 0.0, 180.0
+        else:
+            a_left, a_right = 180.0, 0.0
+        dab("push", left[0], left[1], jaw_r, abs(jaw), a_left)
+        dab("push", right[0], right[1], jaw_r, abs(jaw), a_right)
+    if abs(nose) >= 0.05:
+        nx, ny = face["nose"]
+        half = max(4.0, 0.12 * inter)
+        nose_r = max(8.0, 0.10 * inter)
+        if nose > 0.0:
+            a_left, a_right = 0.0, 180.0
+        else:
+            a_left, a_right = 180.0, 0.0
+        dab("push", nx - half, ny, nose_r, abs(nose), a_left)
+        dab("push", nx + half, ny, nose_r, abs(nose), a_right)
+    return touched
+
+def face_adjust(image, layer, source, eye, jaw, nose, box, freeze_mode="none", freeze_layer=None, freeze_feather=0.0):
+    if layer.is_group() or _pstr(layer, ROLE) == "original":
+        raise RuntimeError("Choose a normal paint layer, not the hidden liquify snapshot or a group / 请选择普通图层")
+    if layer.get_lock_content():
+        raise RuntimeError("Layer is locked / 图层已锁定")
+    eye = max(-20.0, min(20.0, float(eye)))
+    jaw = max(-30.0, min(30.0, float(jaw)))
+    nose = max(-20.0, min(20.0, float(nose)))
+    if source == "box":
+        x, y, bw, bh = box
+        if bw < 20.0 or bh < 20.0:
+            raise RuntimeError("画一个大概的脸框（宽高至少 20）。画面没有改动。 / Draw a rough face box at least 20 px. Nothing was changed.")
+        face = _face_from_box(x, y, bw, bh)
+    else:
+        face = _detect_face(layer)
+    _dump_face(face, eye, jaw, nose)
+    if abs(eye) < 0.05 and abs(jaw) < 0.05 and abs(nose) < 0.05:
+        return
+    limits = _edit_limits(image, layer, freeze_mode, freeze_layer)
+    weights, bx, by, bw, bh, freeze_src = limits
+    if weights == "empty":
+        return
+    w, h = layer.get_width(), layer.get_height()
+    key = _pstr(layer, KEY)
+    group = _walk_group(image.get_layers(), key) if key else None
+    orig = _original_of(group)
+    if orig is not None and (orig.get_width() != w or orig.get_height() != h):
+        _drop_state(image, layer, group)
+        group, orig = None, None
+    mesh = _load_mesh(layer, w, h) if orig is not None else Mesh(w, h)
+    sample = orig if orig is not None else layer
+    before_blob = _mesh_blob(mesh)
+    touched = _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample)
+    if not touched:
+        return
+    image.undo_group_start()
+    try:
+        if orig is None:
+            group, orig = _make_state(image, layer)
+        hist = _load_stack(layer, HIST)
+        hist.append(before_blob)
+        if len(hist) > HIST_MAX:
+            hist = hist[-HIST_MAX:]
+        _save_stack(layer, HIST, hist)
+        _save_stack(layer, REDO, [])
+        _save_mesh(layer, mesh)
+        _render(orig, layer, mesh)
+        if freeze_mode == "layer" and freeze_layer is not None:
+            freeze_layer.set_visible(False)
+        image.set_selected_layers([layer])
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+
+def run_face(procedure, run_mode, image, drawables, config, data):
+    if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
+        return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
+            GLib.Error("Select exactly one layer / 请选择一个图层"))
+    if run_mode == Gimp.RunMode.INTERACTIVE:
+        GimpUi.init(PROC_FACE)
+        dlg = GimpUi.ProcedureDialog.new(procedure, config, "按脸调整 / Face Adjust")
+        dlg.fill(["source", "eye", "jaw", "nose", "box-x", "box-y", "box-width", "box-height",
+                  "freeze", "freeze-layer", "freeze-feather"])
+        ok = dlg.run()
+        dlg.destroy()
+        if not ok:
+            return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, None)
+    try:
+        src_i = config.get_choice_id("source")
+        source = "box" if src_i == 1 else "auto"
+        fr_i = config.get_choice_id("freeze")
+        fr_mode = ("none", "layer", "selection")[fr_i] if 0 <= fr_i <= 2 else "none"
+        face_adjust(image, drawables[0], source,
+                    config.get_property("eye"), config.get_property("jaw"), config.get_property("nose"),
+                    (config.get_property("box-x"), config.get_property("box-y"),
+                     config.get_property("box-width"), config.get_property("box-height")),
+                    fr_mode, config.get_property("freeze-layer"), config.get_property("freeze-feather"))
+    except Exception as e:
+        return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
+    return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
+
 def run(procedure, run_mode, image, drawables, config, data):
     if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
         return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
@@ -1132,7 +1408,7 @@ class MeshLiquify(Gimp.PlugIn):
         return False
 
     def do_query_procedures(self):
-        return [PROC, PROC_STROKE, PROC_UNDO, PROC_REDO]
+        return [PROC, PROC_STROKE, PROC_UNDO, PROC_REDO, PROC_FACE]
 
     def do_create_procedure(self, name):
         if name == PROC_STROKE:
@@ -1141,7 +1417,49 @@ class MeshLiquify(Gimp.PlugIn):
             return self._make_step_proc(name, False)
         if name == PROC_REDO:
             return self._make_step_proc(name, True)
+        if name == PROC_FACE:
+            return self._make_face_proc(name)
         return self._make_liquify_proc(name)
+
+    def _make_face_proc(self, name):
+        F = GObject.ParamFlags.READWRITE
+        p = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, run_face, None)
+        p.set_image_types("RGB*, GRAY*")
+        p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
+        p.set_menu_label("按脸调整 / Face Adjust")
+        p.add_menu_path("<Image>/Filters/修图工具/")
+        p.set_documentation(
+            "Slight eye size and a soft jaw (plus nose width) on one detected face, using the same mesh liquify. 在一张脸上轻微改眼睛大小、下颌宽窄，以及鼻翼。",
+            "Auto uses YuNet (five points: two eyes, nose tip, two mouth corners) via the host Python OpenCV. "
+            "If that is missing, or no face is found, nothing is changed. Manual box is not a detector: it only places the same sliders on a rectangle you give. "
+            "One dialog confirm is one undoable stroke (撤销上一笔液化). Slider 0 does nothing. Not verified by hand. 尚未人工验证。",
+            name)
+        p.set_attribution("Elysia", "Elysia", "2026")
+        src = Gimp.Choice.new()
+        src.add("auto", 0, "Detect / 自动认脸", "YuNet on this layer. If no face is found, nothing changes. 找不到脸就不改。")
+        src.add("box", 1, "Manual box / 手动画框", "Not detection. You give a rough face rectangle; eyes, jaw and nose are placed by proportion. 不是认脸，只按你给的框估计位置。")
+        p.add_choice_argument("source", "Face source / 脸的位置", "Automatic detection, or a box you place.", src, "auto", F)
+        p.add_double_argument("eye", "Eye size / 眼睛大小 (-20..20)",
+                              "0 = no change. Positive makes both eyes slightly larger, negative slightly smaller. 0 不动。正数两眼一起略放大。",
+                              -20.0, 20.0, 0.0, F)
+        p.add_double_argument("jaw", "Jaw / 下颌 (-30..30)",
+                              "0 = no change. Positive narrows the jaw softly, negative widens it. 0 不动。正数把下颌往里收，负数放宽。",
+                              -30.0, 30.0, 0.0, F)
+        p.add_double_argument("nose", "Nose width / 鼻宽 (-20..20)",
+                              "0 = no change. Positive narrows, negative widens. From the same nose point. 0 不动。正数收窄。",
+                              -20.0, 20.0, 0.0, F)
+        p.add_double_argument("box-x", "Manual box X / 手动画框左", "Layer pixels. Used only for manual box.", -100000.0, 1000000.0, 0.0, F)
+        p.add_double_argument("box-y", "Manual box Y / 手动画框上", "Layer pixels. Used only for manual box.", -100000.0, 1000000.0, 0.0, F)
+        p.add_double_argument("box-width", "Manual box width / 手动画框宽", "At least 20. Ignored when detecting.", 0.0, 1000000.0, 0.0, F)
+        p.add_double_argument("box-height", "Manual box height / 手动画框高", "At least 20. Ignored when detecting.", 0.0, 1000000.0, 0.0, F)
+        fr = Gimp.Choice.new()
+        fr.add("none", 0, "No freeze / 不冻结", "")
+        fr.add("layer", 1, "Freeze layer / 用冻结图层", "White pixels stay put. The layer is hidden after use.")
+        fr.add("selection", 2, "Turn selection into freeze / 把当前选区变成冻结", "Selected pixels stay put.")
+        p.add_choice_argument("freeze", "Freeze / 冻结", "Same freeze as the other liquify strokes.", fr, "none", F)
+        p.add_drawable_argument("freeze-layer", "Freeze layer / 冻结图层（白=冻住）", "White = frozen. Hidden after use, not deleted.", True, F)
+        p.add_double_argument("freeze-feather", "Freeze edge softness px / 冻结边缘柔化 (0=自动)", "0 = about a quarter of the brush radius.", 0.0, 400.0, 0.0, F)
+        return p
 
     def _make_step_proc(self, name, redo):
         fn = run_redo_stroke if redo else run_undo_stroke

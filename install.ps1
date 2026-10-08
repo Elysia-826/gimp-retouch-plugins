@@ -31,7 +31,7 @@ $C = [ordered]@{
   "fsep_oneclick"   = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("fsep_oneclick\fsep_oneclick.py"); procs=@("python-fu-fsep-oneclick") }
   "dnb_setup"       = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("dnb_setup\dnb_setup.py"); procs=@("python-fu-dnb-setup") }
   "batch_export"    = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("batch_export\batch_export.py","batch_export\cli_run.py"); procs=@("python-fu-batch-export") }
-  "mesh_liquify"    = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("mesh_liquify\mesh_liquify.py"); procs=@("python-fu-mesh-liquify","python-fu-mesh-liquify-stroke-layer","python-fu-mesh-liquify-undo","python-fu-mesh-liquify-redo") }
+  "mesh_liquify"    = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("mesh_liquify\mesh_liquify.py","mesh_liquify\face_detect.py","mesh_liquify\face_detection_yunet_2023mar.onnx"); procs=@("python-fu-mesh-liquify","python-fu-mesh-liquify-stroke-layer","python-fu-mesh-liquify-undo","python-fu-mesh-liquify-redo","python-fu-mesh-liquify-face") }
   "gmic"            = @{ kind="zip"; gimp="3.2"; ver="4.0.5"; file="gmic_4.0.5_gimp3.2_win64.zip"
                          url="https://gmic.eu/files/windows/gmic_4.0.5_gimp3.2_win64.zip"
                          sha="739bc467de3f6e61f85d827f5444339268145f4b3aaddbdb834b1e3b2ce7a950"; dirs=@("gmic_gimp_qt"); procs=@("plug-in-gmic-qt")

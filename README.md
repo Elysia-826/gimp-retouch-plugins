@@ -7,7 +7,7 @@ GIMP 3 (3.0 / 3.2) Python 插件集，跨 Linux / Windows。
 - `dnb_setup` — 一键加深减淡搭建（尚未人工验证），详见 `dnb_setup/README.md`
 - `raw_to_tiff/raw2tiff.sh` — RAW→16 位 TIFF 批量转换（RawTherapee CLI，尚未人工验证），RAW → raw2tiff → batch_export 流程见 `raw_to_tiff/README.md`
 - `batch_export` — 批量导出（尚未人工验证），支持命令行无界面调用，详见 `batch_export/README.md`
-- `mesh_liquify` — 柔和网格液化（尚未人工验证）：推移、膨胀、收缩、旋转、还原，可用冻结蒙版保护不该动的区域。对话框里不能在照片上拖；先「准备液化笔触」，用 GIMP 自己的画笔画线，再沿这条线推移。横线默认从左往右；勾「反向」改成往左。可用「撤销上一笔液化 / 重做上一笔液化」一笔笔退回（不删隐藏组）。认脸还没有。详见 `mesh_liquify/README.md`
+- `mesh_liquify` — 柔和网格液化（尚未人工验证）：推移、膨胀、收缩、旋转、还原，可用冻结蒙版保护不该动的区域。对话框里不能在照片上拖；先「准备液化笔触」，用 GIMP 自己的画笔画线，再沿这条线推移。横线默认从左往右；勾「反向」改成往左。可用「撤销上一笔液化 / 重做上一笔液化」一笔笔退回（不删隐藏组）。另有「按脸调整」：自动认脸或手动画框，滑眼睛、下颌、鼻宽（尚未人工验证）。详见 `mesh_liquify/README.md`
 
 ## 可选安装 / 一键重装（尚未人工验证）
 Linux（GIMP 3.0 apt + GIMP 3.2 Flatpak --user）。逻辑在 `installer/bundle.py`（`install.sh` 只是入口，需要 python3）；

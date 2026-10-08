@@ -4,7 +4,7 @@ import math, os, struct, time
 import gi
 gi.require_version("Gimp", "3.0")
 gi.require_version("Gegl", "0.4")
-from gi.repository import Gimp, Gegl
+from gi.repository import Gimp, Gegl, Gio
 
 Gegl.init(None)
 pdb = Gimp.get_pdb()
@@ -729,5 +729,177 @@ if c_on[0] >= 76:
     die("reverse did not push toward smaller x: %s" % (c_on,))
 if fz_off != 0 or fz_on != 0:
     die("frozen pixels moved reverse off=%d on=%d" % (fz_off, fz_on))
+
+
+def call_status(name, img, layer, **kw):
+    proc = pdb.lookup_procedure(name)
+    if proc is None:
+        return None, "missing"
+    cfg = proc.create_config()
+    cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+    cfg.set_property("image", img)
+    cfg.set_core_object_array("drawables", [layer]) if hasattr(cfg, "set_core_object_array") else cfg.set_property("drawables", [layer])
+    for k, v in kw.items():
+        cfg.set_property(k, v)
+    res = proc.run(cfg)
+    st = res.index(0)
+    err = ""
+    if st != Gimp.PDBStatusType.SUCCESS and res.length() > 1 and res.index(1) is not None:
+        err = str(res.index(1))
+    return st, err
+
+def _groups(img):
+    return [l for l in img.get_layers() if l.is_group() and "Liquify" in l.get_name()]
+
+def _paint_face(buf, w, h, bpp):
+    for y in range(h):
+        for x in range(w):
+            i = (y * w + x) * bpp
+            buf[i:i + 4] = b"\xd2\xaa\x8c\xff"
+            if 140 <= x < 220 and 50 <= y < 90 and ((x // 2 + y // 2) & 1):
+                buf[i:i + 4] = b"\xb4\x8c\x6e\xff"
+            if (x - 146) * (x - 146) + (y - 190) * (y - 190) <= 36:
+                buf[i:i + 4] = b"\x28\x22\x20\xff"
+            if (x - 254) * (x - 254) + (y - 190) * (y - 190) <= 36:
+                buf[i:i + 4] = b"\x28\x22\x20\xff"
+            if abs(x - 110) <= 2 and abs(y - 357) <= 2:
+                buf[i:i + 4] = b"\xff\x00\x00\xff"
+
+def _hip(raw, w, x0, y0, x1, y1):
+    acc = n = 0
+    for y in range(y0, y1):
+        for x in range(x0, x1 - 1):
+            i = (y * w + x) * 4
+            acc += abs(raw[i] - raw[i + 4])
+            n += 1
+    return acc / float(n or 1)
+
+# manual box: slider 0 changes nothing; jaw narrows toward +x on the left; freeze stays 0; one undo
+imgf, layf, (fw, fh, f0) = new_image(
+    400, 480, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, _paint_face)
+frf = Gimp.Layer.new(imgf, "冻结", fw, fh, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
+imgf.insert_layer(frf, None, 0)
+frf.get_buffer().set(Gegl.Rectangle.new(0, 0, fw, fh), "R'G'B'A u8", bytes([0, 0, 0, 255]) * (fw * fh))
+frf.get_buffer().set(Gegl.Rectangle.new(320, 0, fw - 320, fh), "R'G'B'A u8", bytes([255, 255, 255, 255]) * ((fw - 320) * fh))
+frf.update(0, 0, fw, fh)
+Gimp.Selection.none(imgf)
+box = {"source": "box", "box-x": 40.0, "box-y": 30.0, "box-width": 320.0, "box-height": 400.0,
+       "freeze": "layer", "freeze-layer": frf, "freeze-feather": 8.0}
+call_named("python-fu-mesh-liquify-face", imgf, layf, eye=0.0, jaw=0.0, nose=0.0, **box)
+_, _, fz0 = pixels(layf, "R'G'B'A u8")
+zdiff, _ = count_diff(f0, fz0, fw, fh, 4, lambda x, y: True)
+print("MESH_TEST face_zero diff=%d groups=%d" % (zdiff, len(_groups(imgf))), flush=True)
+if zdiff != 0 or _groups(imgf):
+    die("slider 0 changed pixels or created a state group")
+call_named("python-fu-mesh-liquify-face", imgf, layf, eye=0.0, jaw=16.0, nose=0.0, **box)
+_, _, fj = pixels(layf, "R'G'B'A u8")
+cm = centroid(fj, fw, fh, 4, lambda raw, i: raw[i] > 200 and raw[i + 1] < 40 and raw[i + 2] < 40)
+frozen, _ = count_diff(f0, fj, fw, fh, 4, lambda x, y: x >= 320)
+fore, _ = count_diff(f0, fj, fw, fh, 4, lambda x, y: 140 <= x < 220 and 50 <= y < 90)
+hip0 = _hip(f0, fw, 140, 50, 220, 90)
+hip1 = _hip(fj, fw, 140, 50, 220, 90)
+print("MESH_TEST face_jaw marker=%s frozen=%d forehead=%d hipass %.3f -> %.3f" % (
+    cm, frozen, fore, hip0, hip1), flush=True)
+if cm is None or cm[0] < 113:
+    die("jaw did not push the left marker inward (toward +x): %s" % (cm,))
+if frozen != 0 or fore != 0:
+    die("freeze or forehead moved")
+if hip1 < hip0 * 0.85:
+    die("forehead texture dropped")
+call_named("python-fu-mesh-liquify-undo", imgf, layf)
+_, _, fu = pixels(layf, "R'G'B'A u8")
+ud, _ = count_diff(f0, fu, fw, fh, 4, lambda x, y: True)
+gst = _groups(imgf)
+print("MESH_TEST face_undo diff=%d groups=%d hidden=%s" % (
+    ud, len(gst), all(not g.get_visible() for g in gst)), flush=True)
+if ud != 0 or len(gst) != 1 or gst[0].get_visible():
+    die("face jaw was not one undoable stroke")
+# both sliders, still one undo from the original (redo the undone jaw first? image is original after undo)
+call_named("python-fu-mesh-liquify-face", imgf, layf, eye=12.0, jaw=0.0, nose=0.0, **box)
+_, _, fe = pixels(layf, "R'G'B'A u8")
+eye_d, _ = count_diff(f0, fe, fw, fh, 4, lambda x, y: abs(x - 146) <= 24 and abs(y - 190) <= 24)
+eye_far, _ = count_diff(f0, fe, fw, fh, 4, lambda x, y: 140 <= x < 220 and 50 <= y < 90)
+print("MESH_TEST face_eye near=%d forehead=%d" % (eye_d, eye_far), flush=True)
+if eye_d < 5 or eye_far != 0:
+    die("eye slider did not stay on the eyes")
+imgf.delete()
+
+# no face: say so, change nothing
+imgn, layn, (nw, nh, n0) = new_image(
+    80, 80, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4,
+    lambda buf, w, h, bpp: [buf.__setitem__(slice((y * w + x) * bpp, (y * w + x) * bpp + 4), b"\x30\x60\x90\xff")
+                            for y in range(h) for x in range(w)])
+st, err = call_status("python-fu-mesh-liquify-face", imgn, layn, source="auto",
+                      eye=0.0, jaw=10.0, nose=0.0,
+                      **{"box-x": 0.0, "box-y": 0.0, "box-width": 0.0, "box-height": 0.0,
+                         "freeze": "none", "freeze-feather": 0.0})
+_, _, n1 = pixels(layn, "R'G'B'A u8")
+nd, _ = count_diff(n0, n1, nw, nh, 4, lambda x, y: True)
+print("MESH_TEST face_none status=%s diff=%d groups=%d err=%s" % (st, nd, len(_groups(imgn)), err[:80]), flush=True)
+if st == Gimp.PDBStatusType.SUCCESS or nd != 0 or _groups(imgn):
+    die("missing face should change nothing and report an error")
+imgn.delete()
+
+# selfie
+selfie = "/workspace/retouch-trial/before.jpg"
+if not os.path.isfile(selfie):
+    die("selfie missing")
+imgs = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(selfie))
+lays = [l for l in imgs.get_layers() if not l.is_group()]
+if not lays:
+    die("selfie has no layer")
+lays = lays[0]
+sw, sh = lays.get_width(), lays.get_height()
+_, _, s0 = pixels(lays, "R'G'B'A u8")
+frs = Gimp.Layer.new(imgs, "冻结", sw, sh, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
+imgs.insert_layer(frs, None, 0)
+frs.get_buffer().set(Gegl.Rectangle.new(0, 0, sw, sh), "R'G'B'A u8", bytes([0, 0, 0, 255]) * (sw * sh))
+frs.get_buffer().set(Gegl.Rectangle.new(1700, 0, sw - 1700, sh), "R'G'B'A u8", bytes([255, 255, 255, 255]) * ((sw - 1700) * sh))
+frs.update(0, 0, sw, sh)
+Gimp.Selection.none(imgs)
+st0, err0 = call_status("python-fu-mesh-liquify-face", imgs, lays, source="auto",
+                        eye=0.0, jaw=0.0, nose=0.0,
+                        **{"box-x": 0.0, "box-y": 0.0, "box-width": 0.0, "box-height": 0.0,
+                           "freeze": "layer", "freeze-layer": frs, "freeze-feather": 8.0})
+_, _, szero = pixels(lays, "R'G'B'A u8")
+zd, _ = count_diff(s0, szero, sw, sh, 4, lambda x, y: True)
+import json
+info = json.load(open("/tmp/mesh-liquify-face-last.json", encoding="utf-8"))
+print("MESH_TEST face_selfie_detect status=%s zero_diff=%d score=%s box=%s eyes=%s,%s nose=%s" % (
+    st0, zd, info.get("score"), [round(v, 1) for v in info["box"]],
+    [round(v, 1) for v in info["right_eye"]], [round(v, 1) for v in info["left_eye"]],
+    [round(v, 1) for v in info["nose"]]), flush=True)
+if st0 != Gimp.PDBStatusType.SUCCESS or zd != 0 or info.get("manual"):
+    die("selfie detect failed or slider 0 changed pixels: %s" % err0)
+stj, errj = call_status("python-fu-mesh-liquify-face", imgs, lays, source="auto",
+                        eye=0.0, jaw=8.0, nose=0.0,
+                        **{"box-x": 0.0, "box-y": 0.0, "box-width": 0.0, "box-height": 0.0,
+                           "freeze": "layer", "freeze-layer": frs, "freeze-feather": 8.0})
+_, _, sj = pixels(lays, "R'G'B'A u8")
+bx, by, bw, bh = info["box"]
+# forehead inside the detected box, above the eyes
+ey = min(info["right_eye"][1], info["left_eye"][1])
+fx0, fy0 = int(bx + bw * 0.40), int(by + bh * 0.08)
+fx1, fy1 = int(bx + bw * 0.60), int(min(ey - 30, by + bh * 0.22))
+fore_s, _ = count_diff(s0, sj, sw, sh, 4, lambda x, y, a=fx0, b=fy0, c=fx1, d=fy1: a <= x < c and b <= y < d)
+frz_s, _ = count_diff(s0, sj, sw, sh, 4, lambda x, y: x >= 1700)
+jy = int(info["jaw"][0][1])
+jx = int(info["jaw"][0][0])
+jaw_s, _ = count_diff(s0, sj, sw, sh, 4, lambda x, y, cx=jx, cy=jy: abs(x - cx) <= 40 and abs(y - cy) <= 40)
+hip_b = _hip(s0, sw, fx0, fy0, fx1, fy1)
+hip_a = _hip(sj, sw, fx0, fy0, fx1, fy1)
+print("MESH_TEST face_selfie_jaw status=%s jaw_diff=%d forehead=%d frozen=%d hipass %.3f -> %.3f jaw_pt=%s" % (
+    stj, jaw_s, fore_s, frz_s, hip_b, hip_a, [round(info["jaw"][0][0], 1), round(info["jaw"][0][1], 1)]), flush=True)
+if stj != Gimp.PDBStatusType.SUCCESS or jaw_s < 10 or fore_s != 0 or frz_s != 0:
+    die("selfie jaw slider failed: %s" % errj)
+if hip_a < hip_b * 0.9:
+    die("selfie forehead texture dropped")
+call_named("python-fu-mesh-liquify-undo", imgs, lays)
+_, _, su = pixels(lays, "R'G'B'A u8")
+sud, _ = count_diff(s0, su, sw, sh, 4, lambda x, y: True)
+print("MESH_TEST face_selfie_undo diff=%d" % sud, flush=True)
+if sud != 0:
+    die("undo did not restore the selfie")
+imgs.delete()
 
 print("MESH_TEST OK", flush=True)

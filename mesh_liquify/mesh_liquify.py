@@ -249,8 +249,192 @@ def _freeze_gate(mask, w, h, feather):
             gate[i] = u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
     return gate
 
+def _lum_rect(drawable, x, y, w, h):
+    """Layer-pixel luminance (0..1) from a drawable whose buffer is layer-sized."""
+    buf = drawable.get_buffer()
+    ext = buf.get_extent()
+    rect = Gegl.Rectangle.new(int(ext.x + x), int(ext.y + y), int(w), int(h))
+    raw = buf.get(rect, 1.0, "Y float", Gegl.AbyssPolicy.CLAMP)
+    vals = array.array("f")
+    vals.frombytes(_bytes(raw))
+    if len(vals) != w * h:
+        return None
+    return vals
+
+def _smoother(t):
+    if t <= 0.0:
+        return 0.0
+    if t >= 1.0:
+        return 1.0
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+
+def _clean_edges(mesh, src, gate, gx, gy, gw, gh):
+    """Keep a contrast boundary from being sheared open.
+
+    Where a soft edge (jaw against wood, a hard step) sits in a steep
+    part of the displacement, every pixel of that boundary is given the
+    same displacement as the free side just outside it, so the boundary
+    moves as one piece. Frozen pixels stay at 0. Skin away from the
+    boundary keeps the brush displacement, so texture is not blurred.
+    """
+    if os.environ.get("MESH_LIQUIFY_NO_CLEAN") or os.path.exists("/tmp/mesh-liquify-no-clean"):
+        return
+    if mesh.bw < 12 or mesh.bh < 12 or src is None:
+        return
+    lum = _lum_rect(src, mesh.x, mesh.y, mesh.bw, mesh.bh)
+    if lum is None:
+        return
+    w, h = mesh.bw, mesh.bh
+    span = 4
+    mag = array.array("f", [0.0]) * (w * h)
+    # Horizontal contrast only. A jaw/wood boundary is mostly vertical;
+    # pores cancel across 8px. Vertical boundaries are handled per row,
+    # horizontal ones per column below.
+    for y in range(h):
+        row = y * w
+        for x in range(span, w - span):
+            mag[row + x] = abs(lum[row + x + span] - lum[row + x - span])
+    a = mesh.a
+    ox, oy = mesh.x, mesh.y
+
+    def gate_at(x, y):
+        if gate is None:
+            return 1.0
+        lx, ly = ox + x, oy + y
+        if lx < gx or ly < gy or lx >= gx + gw or ly >= gy + gh:
+            return 1.0
+        return gate[(ly - gy) * gw + (lx - gx)]
+
+    def put(x, y, dx, dy):
+        g = gate_at(x, y)
+        # Frozen, and the first part of the feather, stay as the brush left
+        # them (frozen is exactly 0). Writing the full free-side move there
+        # would drag the protected side.
+        if g < 0.35:
+            return False
+        j = (y * w + x) * 2
+        a[j] = dx
+        a[j + 1] = dy
+        return True
+
+    def get(x, y):
+        j = (y * w + x) * 2
+        return a[j], a[j + 1]
+
+    def lock_run(y, a0, b0, horizontal):
+        # a0..b0 inclusive is the contrast ramp in mesh coords along the axis.
+        if b0 - a0 < 1:
+            return
+        if horizontal:
+            # vary x, fixed y
+            def outside(side):
+                x = a0 - 3 if side < 0 else b0 + 3
+                if x < 0 or x >= w:
+                    return None
+                if gate_at(x, y) <= 0.0:
+                    return None
+                return get(x, y)
+        else:
+            def outside(side):
+                yy = a0 - 3 if side < 0 else b0 + 3
+                if yy < 0 or yy >= h:
+                    return None
+                if gate_at(y, yy) <= 0.0:
+                    return None
+                return get(y, yy)
+        left, right = outside(-1), outside(1)
+        def hm(s):
+            return -1.0 if s is None else math.hypot(s[0], s[1])
+        if hm(left) <= 0.5 and hm(right) <= 0.5:
+            return
+        D = left if hm(left) >= hm(right) else right
+        # only bother when the ramp's own displacement disagrees with D
+        mid = (a0 + b0) // 2
+        if horizontal:
+            c = get(mid, y)
+        else:
+            c = get(y, mid)
+        if abs(D[0] - c[0]) < 0.8 and abs(D[1] - c[1]) < 0.8:
+            return
+        # The smeared boundary shows up where the moved pixels land, about
+        # |D| px on the free side of the source edge. Hold displacement
+        # constant across that whole trip so the resample crosses the edge
+        # in one step instead of sliding along it.
+        reach = int(math.hypot(D[0], D[1])) + 2
+        if reach > 48:
+            reach = 48
+        free_is_right = hm(right) > hm(left)
+        if horizontal:
+            if free_is_right:
+                lo, hi = a0, min(w - 1, b0 + reach)
+            else:
+                lo, hi = max(0, a0 - reach), b0
+            for x in range(lo, hi + 1):
+                if x < a0 or x > b0:
+                    dx0, dy0 = get(x, y)
+                    if dx0 == 0.0 and dy0 == 0.0:
+                        continue
+                put(x, y, D[0], D[1])
+        else:
+            if free_is_right:
+                lo, hi = a0, min(h - 1, b0 + reach)
+            else:
+                lo, hi = max(0, a0 - reach), b0
+            for yy in range(lo, hi + 1):
+                if yy < a0 or yy > b0:
+                    dx0, dy0 = get(y, yy)
+                    if dx0 == 0.0 and dy0 == 0.0:
+                        continue
+                put(y, yy, D[0], D[1])
+
+    # Vertical boundaries, one row at a time.
+    for y in range(h):
+        row = y * w
+        x = span
+        while x < w - span:
+            m = mag[row + x]
+            if m < 0.07 or m < mag[row + x - 1] or m < mag[row + x + 1]:
+                x += 1
+                continue
+            a0 = b0 = x
+            while a0 > span and mag[row + a0 - 1] > m * 0.45:
+                a0 -= 1
+            while b0 + 1 < w - span and mag[row + b0 + 1] > m * 0.45:
+                b0 += 1
+            lock_run(y, a0, b0, True)
+            x = b0 + 2
+    # Horizontal boundaries (chin, brow): wide gradient down the columns.
+    vmag = array.array("f", [0.0]) * (w * h)
+    for y in range(span, h - span):
+        row = y * w
+        up = (y - span) * w
+        dn = (y + span) * w
+        for x in range(w):
+            vmag[row + x] = abs(lum[dn + x] - lum[up + x])
+    for x in range(w):
+        y = span
+        while y < h - span:
+            m = vmag[y * w + x]
+            if m < 0.07 or m < vmag[(y - 1) * w + x] or m < vmag[(y + 1) * w + x]:
+                y += 1
+                continue
+            a0 = b0 = y
+            while a0 > span and vmag[(a0 - 1) * w + x] > m * 0.45:
+                a0 -= 1
+            while b0 + 1 < h - span and vmag[(b0 + 1) * w + x] > m * 0.45:
+                b0 += 1
+            lock_run(x, a0, b0, False)
+            y = b0 + 2
+    if gate is not None:
+        for y in range(h):
+            for x in range(w):
+                if gate_at(x, y) <= 0.0:
+                    j = (y * w + x) * 2
+                    a[j] = 0.0
+                    a[j + 1] = 0.0
+
 def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise, weights, wx, wy, ww, wh,
-           freeze_src=None, freeze_feather=0.0, layer=None):
+           freeze_src=None, freeze_feather=0.0, layer=None, sample=None):
     """Add one soft brush to the mesh. Returns True if any sample was visited."""
     r = float(radius)
     if r < 1.0:
@@ -280,7 +464,7 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
     if not mesh.ensure(ix0, iy0, ix1, iy1):
         return False
     gate = None
-    gx = gy = gw = 0
+    gx = gy = gw = gh = 0
     if freeze_src is not None and layer is not None:
         feat = float(freeze_feather)
         if feat <= 0.0:
@@ -292,6 +476,7 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
             mask = _sample_y(freeze_src, layer, gx, gy, gx1 - gx, gy1 - gy)
             gate = _freeze_gate(mask, gx1 - gx, gy1 - gy, feat)
             gw = gx1 - gx
+            gh = gy1 - gy
     inner = max(0.0, min(0.95, float(hardness))) * r
     span = max(1e-6, r - inner)
     r2 = r * r
@@ -387,6 +572,8 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
                 a[i] += ddx * s
                 a[i + 1] += ddy * s
             touched = True
+    if touched and mode != "restore":
+        _clean_edges(mesh, sample if sample is not None else layer, gate, gx, gy, gw, gh)
     if touched and mesh.max_abs() < 1e-3:
         mesh.x = mesh.y = mesh.bw = mesh.bh = 0
         mesh.a = array.array("f")
@@ -474,8 +661,9 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
         group, orig = None, None
     mesh = _load_mesh(layer, w, h) if orig is not None else Mesh(w, h)
     t0 = time.perf_counter()
+    sample = orig if orig is not None else layer
     touched = deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise,
-                     weights, bx, by, bw, bh, freeze_src, freeze_feather, layer)
+                     weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample)
     if not touched:
         return
     image.undo_group_start()
@@ -550,7 +738,8 @@ class MeshLiquify(Gimp.PlugIn):
             "Coordinates are layer pixels; x1/y1 < 0 uses the selection (or layer) center. "
             "x2/y2 < 0 means a single dab (push then uses angle). Respects an existing selection. "
             "Freeze (冻结): a separate layer where white pixels never move, or turn the current selection into a freeze. "
-            "Near a freeze edge, free pixels ease to zero so the mesh does not tear. Frozen pixels themselves stay put. The freeze layer is hidden after use; unhide it if you want to edit the mask.",
+            "Near a freeze edge, free pixels ease to zero so the mesh does not tear. Frozen pixels themselves stay put. The freeze layer is hidden after use; unhide it if you want to edit the mask. "
+            "A strong contrast edge is moved as one piece, so a steep displacement does not stretch it into a wide ramp. Skin away from that edge is not blurred.",
             name)
         p.set_attribution("Elysia", "Elysia", "2026")
         ch = Gimp.Choice.new()

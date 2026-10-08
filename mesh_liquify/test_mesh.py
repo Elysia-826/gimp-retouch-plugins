@@ -427,4 +427,100 @@ if fz3 != 0 or mv3 < 10:
     die("selection-as-freeze failed")
 imgt.delete()
 
+
+def _edge_paint(buf, w, h, bpp):
+    # Wood on the left, textured skin on the right, soft boundary between.
+    for y in range(h):
+        for x in range(w):
+            n = ((x * 13 + y * 3) % 11) - 5
+            if x > 108:
+                r = 160 + n
+            elif x < 96:
+                r = 42
+            else:
+                u = (x - 96) / 12.0
+                r = (1.0 - u) * 42 + u * (160 + n)
+            i = (y * w + x) * bpp
+            buf[i] = max(0, min(255, int(r)))
+            buf[i + 1] = buf[i]
+            buf[i + 2] = buf[i]
+            buf[i + 3] = 255
+
+def _band_width(raw, w, h):
+    # Longest run of pixels that are between the wood and the skin, per row.
+    acc = rows = 0
+    for y in range(25, 55):
+        run = best = 0
+        for x in range(w):
+            v = raw[(y * w + x) * 4]
+            if 55 < v < 150:
+                run += 1
+                if run > best:
+                    best = run
+            else:
+                run = 0
+        if best:
+            acc += best
+            rows += 1
+    return acc / float(rows or 1)
+
+def _hipass(raw, w):
+    s = n = 0
+    for y in range(20, 60):
+        for x in range(130, 180):
+            i = (y * w + x) * 4
+            s += abs(raw[i] - raw[i + 4])
+            n += 1
+    return s / float(n)
+
+def _run_edge(clean):
+    flag = "/tmp/mesh-liquify-no-clean"
+    if clean:
+        if os.path.exists(flag):
+            os.remove(flag)
+    else:
+        open(flag, "w").close()
+    im, lay, (ew, eh, e0) = new_image(
+        240, 80, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, _edge_paint)
+    fr = Gimp.Layer.new(im, "冻结", ew, eh, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
+    im.insert_layer(fr, None, 0)
+    fr.get_buffer().set(Gegl.Rectangle.new(0, 0, ew, eh), "R'G'B'A u8", bytes([0, 0, 0, 255]) * (ew * eh))
+    fr.get_buffer().set(Gegl.Rectangle.new(0, 0, 90, eh), "R'G'B'A u8", bytes([255, 255, 255, 255]) * (90 * eh))
+    fr.update(0, 0, ew, eh)
+    Gimp.Selection.none(im)
+    call(im, lay, mode="push", x1=120.0, y1=40.0, x2=-1.0, y2=-1.0,
+         radius=70.0, strength=70.0, hardness=0.0, angle=0.0, clockwise=True,
+         **{"freeze": "layer", "freeze-layer": fr, "freeze-feather": 40.0})
+    _, _, e1 = pixels(lay, "R'G'B'A u8")
+    wb = _band_width(e0, ew, eh)
+    wa = _band_width(e1, ew, eh)
+    hb = _hipass(e0, ew)
+    ha = _hipass(e1, ew)
+    fz, fzmax = count_diff(e0, e1, ew, eh, 4, lambda x, y: x < 90)
+    hidden = (not fr.get_visible())
+    state_ok = False
+    for l in im.get_layers():
+        if l.is_group() and "Liquify State" in l.get_name():
+            state_ok = (not l.get_visible())
+    im.delete()
+    return wb, wa, hb, ha, fz, fzmax, hidden, state_ok
+
+wb, wa, hb, ha, fz, fzmax, hidden, state_ok = _run_edge(True)
+wb0, wa0, hb0, ha0, fz0, fzmax0, _, _ = _run_edge(False)
+flag = "/tmp/mesh-liquify-no-clean"
+if os.path.exists(flag):
+    os.remove(flag)
+print("MESH_TEST edge_clean before_width=%.2f after_width=%.2f noclean_after=%.2f hipass %.3f -> %.3f (noclean %.3f) frozen=%d/%d hidden=%s state=%s" % (
+    wb, wa, wa0, hb, ha, ha0, fz, fzmax, hidden, state_ok), flush=True)
+if fz != 0 or fz0 != 0:
+    die("edge test moved frozen pixels")
+if not hidden or not state_ok:
+    die("edge test changed freeze or state visibility")
+if wa >= wa0 - 0.5:
+    die("edge reconstruct did not narrow the boundary (%.2f vs %.2f)" % (wa, wa0))
+if wa > wb + 1.5:
+    die("boundary still wider than the original (%.2f vs %.2f)" % (wa, wb))
+if ha < hb * 0.75:
+    die("skin texture high-pass dropped (%.3f vs %.3f)" % (ha, hb))
+
 print("MESH_TEST OK", flush=True)

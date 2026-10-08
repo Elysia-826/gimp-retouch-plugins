@@ -170,10 +170,34 @@ def _person_grabcut(small, face, sx, sy):
     return np.where(labels == keep, 255, 0).astype(np.uint8)
 
 
+def _face_yellow_limit(mid, face, s):
+    """LAB b above this is yellower than the face, so it is not skin and not an ear.
+
+    Taken from the inner face (cheeks and nose), ignoring the dark hair. One
+    step of slack covers rounding. A surface yellower than the face, such as
+    wood, stays out even where a shadow makes it as dark as hair.
+    """
+    import cv2
+    bx, by, bw, bh = face["box"]
+    lab = cv2.cvtColor(mid, cv2.COLOR_BGR2LAB)
+    x0 = max(0, int((bx + 0.28 * bw) * s))
+    x1 = min(lab.shape[1], int((bx + 0.72 * bw) * s))
+    y0 = max(0, int((by + 0.38 * bh) * s))
+    y1 = min(lab.shape[0], int((by + 0.62 * bh) * s))
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        return 255.0
+    patch = lab[y0:y1, x0:x1]
+    # Hair is much darker than skin. A fixed 50 keeps darker skin in the sample.
+    keep = patch[:, :, 0] > 50
+    if int(keep.sum()) < 40:
+        return 255.0
+    return float(np.percentile(patch[:, :, 2][keep], 99)) + 1.0
+
+
 def _ear_zones(mid, fg, face, s):
     """Ears sit just outside the face box. Add pixels there that touch the
-    head and clearly differ from the background seen in the same rows.
-    Returns the added mask (0/255)."""
+    head, differ in hue from the background in the same rows, and are not
+    yellower than the face. Returns the added mask (0/255)."""
     import cv2
     mh, mw = fg.shape
     bx, by, bw, bh = face["box"]
@@ -184,6 +208,7 @@ def _ear_zones(mid, fg, face, s):
     if not (re and le and mr and ml):
         return np.zeros_like(fg)
     lab = cv2.cvtColor(mid, cv2.COLOR_BGR2LAB).astype(np.float32)
+    yellow_limit = _face_yellow_limit(mid, face, s)
     ey = min(re[1], le[1])
     my = max(mr[1], ml[1])
     zy1 = max(0, int(ey * s))
@@ -211,11 +236,12 @@ def _ear_zones(mid, fg, face, s):
             ref = np.median(bgpx, axis=0)
             spread = np.median(np.abs(bgpx - ref), axis=0)
             dl = lab[y0:y1, zx1:zx2] - ref
-            # Lightness counts less: an ear in shadow is darker, but so is
-            # wood in shadow. Hue and yellowness separate them better.
-            d = np.sqrt((0.35 * dl[:, :, 0]) ** 2 + dl[:, :, 1] ** 2 + dl[:, :, 2] ** 2)
+            # Ignore lightness. A shadow on the same surface differs from the
+            # lit part mostly in L (wood beside the hair); an ear differs in hue.
+            d = np.sqrt(dl[:, :, 1] ** 2 + dl[:, :, 2] ** 2)
             thr = max(8.0, 3.0 * float(np.hypot(spread[1], spread[2])))
-            cand[y0:y1, zx1:zx2] = d > thr
+            not_wood = lab[y0:y1, zx1:zx2, 2] <= yellow_limit
+            cand[y0:y1, zx1:zx2] = (d > thr) & not_wood
         cand = (cand & (fg == 0)).astype(np.uint8) * 255
         cand = cv2.morphologyEx(
             cand, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))

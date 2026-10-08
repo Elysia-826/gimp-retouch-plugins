@@ -235,6 +235,36 @@ w1, w1n = kind_frac(1880, 720, 2076, 1860, "wood")
 w2, w2n = kind_frac(1600, 2320, 1752, 2710, "wood")
 print("SUBJ_TEST hairlike_in_left_hair %.3f (n=%d) woodlike_in_wood1 %.3f (n=%d) woodlike_in_wood2 %.3f (n=%d)" % (
     lh, lhn, w1, w1n, w2, w2n), flush=True)
+# Shadowed wood beside the hair: same yellow family as the lit wood, so the
+# saturated-wood test above misses it. R>G>B with a wide red-blue gap.
+sw_hit = 0
+sw_n = 0
+sw_max = 0
+for y in range(1620, min(1960, sh)):
+    run = 0
+    best = 0
+    for x in range(1900, min(1965, sw)):
+        i = (y * sw + x) * 3
+        r, g, b = s_before[i], s_before[i + 1], s_before[i + 2]
+        ch = max(r, g, b) - min(r, g, b)
+        is_wood = r > g and g > b and r > b + 55 and ch > 48
+        sel = ssel[y * sw + x] > 0.5
+        if is_wood:
+            sw_n += 1
+            if sel:
+                sw_hit += 1
+        if is_wood and sel:
+            run += 1
+            if run > best:
+                best = run
+        else:
+            run = 0
+    if best > sw_max:
+        sw_max = best
+sw_frac = sw_hit / float(sw_n or 1)
+print("SUBJ_TEST shadow_wood frac %.3f (n=%d) max_width %d" % (sw_frac, sw_n, sw_max), flush=True)
+if sw_frac > 0.08 or sw_max > 24:
+    die("shadowed wood beside the hair is selected")
 if vals["left_clothes"] < 0.85 or vals["left_shoulder"] < 0.85:
     die("left shoulder or clothes missing")
 if lh < 0.8:
@@ -263,10 +293,10 @@ for oy in range(out_h):
         raw[o] = r
         raw[o + 1] = g
         raw[o + 2] = b
-with open("/tmp/subject_preview3.ppm", "wb") as f:
+with open("/tmp/subject_preview4.ppm", "wb") as f:
     f.write(("P6\n%d %d\n255\n" % (out_w, out_h)).encode("ascii"))
     f.write(raw)
-print("SUBJ_TEST preview3 /tmp/subject_preview3.ppm %dx%d" % (out_w, out_h), flush=True)
+print("SUBJ_TEST preview4 /tmp/subject_preview4.ppm %dx%d" % (out_w, out_h), flush=True)
 print("SUBJ_TEST selfie_subject_ok", flush=True)
 
 res = call(img, slayer, "skin", 2.0)

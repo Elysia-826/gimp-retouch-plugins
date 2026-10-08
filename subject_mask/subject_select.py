@@ -422,7 +422,9 @@ def main():
     except Exception as e:
         print(json.dumps({"ok": False, "error": "no-cv2", "detail": str(e)}))
         return 3
-    img = cv2.imread(path, cv2.IMREAD_COLOR)
+    # imdecode instead of imread: imread cannot open non-ASCII paths on Windows
+    import numpy
+    img = cv2.imdecode(numpy.fromfile(path, dtype=numpy.uint8), cv2.IMREAD_COLOR)
     if img is None:
         print(json.dumps({"ok": False, "error": "unreadable"}))
         return 4

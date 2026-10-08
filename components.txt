@@ -15,4 +15,5 @@ resynthesizer    |third-party|-          |-            |linux        |n|Resynthe
 batcher          |third-party|-          |-            |linux        |n|Batcher 批量编辑/导出图片与图层；与 batch_export 功能部分重叠
 adjustment-layer |community  |-          |-            |linux        |n|非破坏调整层与图层效果（bunnywaffle）
 photogimp        |community  |-          |-            |linux        |y|PhotoGIMP 类 Photoshop 界面配置（会覆盖 GIMP 配置，需显式选择）
-rawtherapee      |third-party|-          |-            |linux        |n|RawTherapee 5.11（apt，主机级，提供 rawtherapee-cli）
+rawtherapee      |third-party|-          |-            |linux,windows|n|RawTherapee（Linux：apt 5.11，主机级，提供 rawtherapee-cli；Windows：官方 5.13 安装包按用户装，GIMP 用它打开 RAW）
+helper-python    |third-party|-          |-            |windows      |n|Windows 专用：独立的 Python 3.12 + numpy + OpenCV，给选出主体和液化认脸用（GIMP 自带的 Python 装不了 OpenCV）；subject_mask 会自动带上

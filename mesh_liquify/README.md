@@ -71,7 +71,7 @@
 - 下颌：-30 到 30。正数往里收，负数放宽。边缘是软的。
 - 鼻宽：-20 到 20。正数收窄，负数放宽。和眼睛、下颌用同一次认出来的点。
 
-自动认脸用 OpenCV 的 YuNet（插件目录里的 `face_detection_yunet_2023mar.onnx`，约 230KB，来自 OpenCV Zoo，Apache-2.0）。点是：两眼、鼻尖、两个嘴角。下颌没有单独的点，是按嘴角和脸框下沿估计的。GIMP 3.2 Flatpak 自己的 Python 没有 cv2，插件会去叫本机的 `python3`（需要装了 OpenCV）。找不到脸，或者没有 OpenCV，就提示你，像素不动。
+自动认脸用 OpenCV 的 YuNet（插件目录里的 `face_detection_yunet_2023mar.onnx`，约 230KB，来自 OpenCV Zoo，Apache-2.0）。点是：两眼、鼻尖、两个嘴角。下颌没有单独的点，是按嘴角和脸框下沿估计的。GIMP 3.2 Flatpak 自己的 Python 没有 cv2，插件会去叫本机的 `python3`（需要装了 OpenCV）。Windows 上 GIMP 自带的 Python 也装不了 OpenCV，用 `install.ps1` 的 `helper-python` 组件装一个独立的；插件先看环境变量 `RETOUCH_HELPER_PYTHON`，再看 GIMP 配置目录里的 `retouch-helper-python.txt`，再找常见位置。找不到脸，或者没有 OpenCV，就提示你，像素不动。
 
 手动画框不是认脸。来源选「手动画框」，填左上角和宽高（至少 20 像素），眼睛、下颌、鼻子按这个矩形的比例摆。对话框没有人工点开过。
 

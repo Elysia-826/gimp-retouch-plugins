@@ -16,3 +16,7 @@
 这不是发丝抠图。碎发只是从轮廓往外扩大约十来个像素的深色，而且要挨着已经选中的头发。逆光、头发贴在亮窗户上时，那一侧头发仍会被切掉。复杂背景、没认到脸时也可能分不出来，这时画面不动。皮肤蒙版跟着脸颊颜色，强光和深阴影处会有缺口，鼻子两侧的暗部尽量补上了，但不保证每一块皮肤都在里面。
 
 在一键频率分离或一键加深减淡搭建生成的图层上运行时，会先换成它们下面的原照片图层再算（按这两个插件建的组名 Frequency Separation / Dodge & Burn 判断）。
+
+## 运行环境
+
+OpenCV 在插件外面的一个 Python 里跑（`subject_select.py`）。Linux 用本机的 `python3`（要装 OpenCV）。Windows 上 GIMP 自带的 Python 装不了 OpenCV，用 `install.ps1` 的 `helper-python` 组件装一个独立的（选 subject_mask 会自动带上）。插件先看环境变量 `RETOUCH_HELPER_PYTHON`，再看 GIMP 配置目录里的 `retouch-helper-python.txt`，再找常见位置。

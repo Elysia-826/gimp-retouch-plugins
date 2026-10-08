@@ -1066,10 +1066,61 @@ def _dump_face(face, eye, jaw, nose):
             "jaw": [list(p) for p in _jaw_ends(face)],
             "eye": eye, "jaw_slider": jaw, "nose_slider": nose,
         }
-        with open("/tmp/mesh-liquify-face-last.json", "w", encoding="utf-8") as f:
+        with open(os.path.join("/tmp" if os.name != "nt" else tempfile.gettempdir(), "mesh-liquify-face-last.json"), "w", encoding="utf-8") as f:
             json.dump(payload, f)
     except Exception:
         pass
+
+HELPER_PY_FILE = "retouch-helper-python.txt"   # one line: full path of a python that has OpenCV
+_NOWIN = {"creationflags": 0x08000000} if os.name == "nt" else {}   # CREATE_NO_WINDOW: no console flash
+
+def _python_candidates():
+    """Pythons that may have OpenCV. An explicit choice first, then the usual places."""
+    out = []
+
+    def add(p):
+        if p and os.path.isfile(p) and p not in out:
+            out.append(p)
+
+    add(os.environ.get("RETOUCH_HELPER_PYTHON", ""))
+    try:
+        gd = Gimp.directory()
+    except Exception:
+        gd = ""
+    if gd:
+        # the installer writes this file into each GIMP profile (Windows)
+        for d in [gd] + [os.path.join(os.path.dirname(gd), v) for v in ("3.2", "3.0")]:
+            try:
+                with open(os.path.join(d, HELPER_PY_FILE), encoding="utf-8-sig") as fh:
+                    add(fh.readline().strip().strip('"'))
+            except OSError:
+                pass
+    if os.name == "nt":
+        import glob
+        import shutil
+        local = os.environ.get("LOCALAPPDATA", "")
+        if local:
+            add(os.path.join(local, "Programs", "retouch-python", "python.exe"))
+            for p in sorted(glob.glob(os.path.join(local, "Programs", "Python", "Python3*", "python.exe")), reverse=True):
+                add(p)
+        for name in ("python.exe", "python3.exe"):
+            p = shutil.which(name)
+            if p and "WindowsApps" not in p:   # skip the Microsoft Store stub
+                add(p)
+    else:
+        for cand in ("/usr/bin/python3", "/run/host/usr/bin/python3"):
+            add(cand)
+    return out
+
+def _helper_env(site=""):
+    env = os.environ.copy()
+    if os.name == "nt":
+        # GIMP's own Python settings must not leak into a different Python
+        env.pop("PYTHONHOME", None)
+        env.pop("PYTHONPATH", None)
+    if site:
+        env["PYTHONPATH"] = site + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    return env
 
 def _cv2_launcher():
     """A python that can import cv2. Flatpak GIMP does not have it; the host one does."""
@@ -1089,17 +1140,11 @@ def _cv2_launcher():
             if os.path.isdir(sp) and sp not in seen:
                 seen.add(sp)
                 sites.append(sp)
-    pythons = []
-    for cand in ("/usr/bin/python3", "/run/host/usr/bin/python3"):
-        if os.path.exists(cand):
-            pythons.append(cand)
-    for py in pythons:
+    for py in _python_candidates():
         for sp in sites:
-            env = os.environ.copy()
-            if sp:
-                env["PYTHONPATH"] = sp + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+            env = _helper_env(sp)
             try:
-                r = subprocess.run([py, "-c", "import cv2"], capture_output=True, env=env, timeout=30)
+                r = subprocess.run([py, "-c", "import cv2"], capture_output=True, env=env, timeout=60, **_NOWIN)
             except Exception:
                 continue
             if r.returncode == 0:
@@ -1137,7 +1182,7 @@ def _detect_face(layer):
     os.close(fd)
     try:
         _export_ppm(layer, ppm)
-        r = subprocess.run([py, script, model, ppm], capture_output=True, text=True, env=env, timeout=90)
+        r = subprocess.run([py, script, model, ppm], capture_output=True, text=True, env=env, timeout=90, **_NOWIN)
     finally:
         try:
             os.remove(ppm)

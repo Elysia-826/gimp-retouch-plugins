@@ -113,6 +113,7 @@ Windows（自选组件，和 Linux 一样不会一键全装）：
 ```
 powershell -ExecutionPolicy Bypass -File install.ps1 -List
 powershell -ExecutionPolicy Bypass -File install.ps1 -Components fsep_oneclick,gmic,resynthesizer -Gimp 3.2 -BackupDir D:\gimp-bundle-backups [-CacheDir <目录>] [-Reinstall] [-DryRun]
+powershell -ExecutionPolicy Bypass -File install.ps1 -Components subject_mask,rawtherapee -Gimp 3.2 -HelperPythonDir D:\Python\retouch-py312 -RawTherapeeDir D:\RawTherapee
 ```
 - 可选组件：`fsep_oneclick` `dnb_setup` `batch_export` `mesh_liquify` `spot_heal` `dnb_flow` `subject_mask` `action_record` `portrait_brush`（本仓库）、`gmic` 4.0.5（gmic.eu 官方 GIMP 3.2 版）、`resynthesizer` 3.0.1、`batcher` 1.2.10、`adjustment-layer` cc07757、`photogimp` eca3a8f（必须写明才会装）。`-Only ours|third-party|all` 是快捷组合，不含 photogimp。
 - 全部装进 `%APPDATA%\GIMP\<版本>\`，不需要管理员权限。下载文件都按 sha256 校验；`-CacheDir` 里已有且校验通过的文件不会重新下载。GitHub 连不上时，可以自己把文件下载到这个目录再运行。
@@ -120,6 +121,8 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Components fsep_oneclick,g
 - photogimp 会覆盖布局、快捷键和工具预设。gimprc 里的语言、主题、图标、RAW 导入设置会保留（规则与 Linux 相同）。安装前会另做一份专用备份 `photogimp-pre-*.zip`。GIMP 正在运行时拒绝安装（退出码 75）。
 - 已在 Windows 11 + GIMP 3.2.6 上实测安装和无界面注册/运行，插件对话框尚未人工验证。目前还没有卸载功能，要还原请用备份 zip。
 - `-Gimp all` 只装到已有配置目录的版本；刚装好、还没启动过的 GIMP 请写明 `-Gimp 3.2`。
+- `rawtherapee`（必须写明才会装）：用 RawTherapee 官方 5.13 安装包按当前用户静默安装到 `-RawTherapeeDir\5.13`（默认 `%LOCALAPPDATA%\Programs\RawTherapee`，不弹管理员确认），带开始菜单和桌面快捷方式。GIMP 自带的 file-rawtherapee 依次找：环境变量 `RAWTHERAPEE_EXECUTABLE` → 注册表 `HKCU`（再 `HKLM`）`Software\Microsoft\Windows\CurrentVersion\App Paths\rawtherapee.exe` / `rawtherapee-cli.exe` → PATH；安装包的「仅自己」选项会写 HKCU 这两项，脚本再核对一遍，并把 gimprc 的 `import-raw-plug-in` 设为 file-rawtherapee。需要关掉 GIMP 再装（退出码 75）。安装包在 GitHub 上，连不上就先放进 `-CacheDir`。
+- `helper-python`：选出主体（必需）和液化的自动认脸要用 OpenCV。GIMP 自带的 Python 是 MSYS2 版，装不了 PyPI 的 OpenCV，所以单独装一个嵌入版 Python 3.12.10 + numpy 2.5.3 + opencv-python-headless 5.0.0.93 到 `-HelperPythonDir`（默认 `%LOCALAPPDATA%\Programs\retouch-python`），不需要管理员，不改 PATH，不影响你已有的 Python。路径写进 `%APPDATA%\GIMP\<版本>\retouch-helper-python.txt`，插件按它找。下载依次试 python.org/PyPI、npmmirror/华为云、阿里云/清华镜像，全部按 sha256 校验。选 `subject_mask` 会自动带上它和 `mesh_liquify`（认脸模型在那里）；选 `spot_heal` 会自动带上 `resynthesizer`。
 
 ### 组件（`components.txt`，`./install.sh --list`）
 | 组件 | 类别 | requires / recommends | 说明 |

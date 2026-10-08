@@ -74,7 +74,7 @@ def check_catalog(comps, builds, presets):
                 errs.append("components.txt:%d %s: unknown requires/recommends id %s" % (c["line"], c["id"], r))
         if not c["desc"]:
             errs.append("components.txt:%d %s: empty description" % (c["line"], c["id"]))
-        if not any(b["component"] == c["id"] for b in builds):
+        if "linux" in c["os"] and not any(b["component"] == c["id"] for b in builds):   # Windows-only ids live in install.ps1
             errs.append("components.txt:%d %s: no build in bundle.lock" % (c["line"], c["id"]))
     seen = set()
     for b in builds:

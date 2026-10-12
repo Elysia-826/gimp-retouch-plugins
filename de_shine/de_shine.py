@@ -206,7 +206,7 @@ def _selection_for(image, layer):
     return _bytes(buf.get(Gegl.Rectangle.new(int(ox), int(oy), w, h), 1.0, "Y' u8", Gegl.AbyssPolicy.NONE))
 
 
-def _run_helper(image, layer, sens, soft, only_face):
+def _run_helper(image, layer, sens, soft, only_face, flash=False):
     here = os.path.dirname(os.path.abspath(__file__))
     script = os.path.join(here, "deshine_helper.py")
     if not os.path.isfile(script):
@@ -230,7 +230,7 @@ def _run_helper(image, layer, sens, soft, only_face):
         if sel is not None:
             _write_pgm(selp, sel, w, h)
         cmd = [py, script, model or "-", inp, selp if sel is not None else "-", outp, maskp,
-               str(float(sens)), str(float(soft)), "1" if only_face else "0"]
+               str(float(sens)), str(float(soft)), "1" if only_face else "0", "1" if flash else "0"]
         r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300, **_NOWIN)
         line = ""
         for part in (r.stdout or "").splitlines():
@@ -289,10 +289,10 @@ def _new_layer(image, layer, name, rgb, maskbytes):
     return nl, m
 
 
-def apply(image, layer, pro, strength, sens, soft, only_face):
+def apply(image, layer, pro, strength, sens, soft, only_face, flash=False):
     if layer.is_group():
         raise RuntimeError("请选中照片图层，不要选图层组 / Choose the photo layer, not a group")
-    rgb, mask, info = _run_helper(image, layer, sens, soft, only_face)
+    rgb, mask, info = _run_helper(image, layer, sens, soft, only_face, flash)
     k = max(0.0, min(100.0, float(strength))) / 100.0
     scaled = mask.translate(bytes(int(v * k + 0.5) for v in range(256)))
     image.undo_group_start()
@@ -335,7 +335,7 @@ def run(procedure, run_mode, image, drawables, config, data):
     if run_mode == Gimp.RunMode.INTERACTIVE:
         GimpUi.init(PROC)
         dlg = GimpUi.ProcedureDialog.new(procedure, config, "去油光 / De-shine")
-        dlg.fill(["mode", "strength", "sensitivity", "softness", "only-face"])
+        dlg.fill(["mode", "strength", "sensitivity", "softness", "only-face", "flash"])
         ok = dlg.run()
         dlg.destroy()
         if not ok:
@@ -344,7 +344,8 @@ def run(procedure, run_mode, image, drawables, config, data):
         pro = config.get_choice_id("mode") == 1
         layer = drawables[0]
         apply(image, layer, pro, config.get_property("strength"), config.get_property("sensitivity"),
-              config.get_property("softness"), bool(config.get_property("only-face")))
+              config.get_property("softness"), bool(config.get_property("only-face")),
+              bool(config.get_property("flash")))
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
@@ -381,6 +382,8 @@ class DeShine(Gimp.PlugIn):
         p.add_double_argument("sensitivity", "Sensitivity / 检测灵敏度", "Higher also catches fainter shine.", 0.0, 100.0, 50.0, F)
         p.add_double_argument("softness", "Edge softness / 边缘柔和度", "Blur of the mask edge.", 0.0, 100.0, 30.0, F)
         p.add_boolean_argument("only-face", "Only face / 只处理脸部", "Limit to detected faces (eyes and mouth left out).", True, F)
+        p.add_boolean_argument("flash", "Flash hard light / 闪光灯硬光",
+                               "Direct flash: catch larger near-white hotspots and give them back a little grain from nearby skin.", False, F)
         return p
 
 

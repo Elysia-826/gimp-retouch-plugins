@@ -19,7 +19,7 @@ def px(d, fmt="R'G'B' u8"):
     return bytes(d.get_buffer().get(Gegl.Rectangle.new(0, 0, w, h), 1.0, fmt, Gegl.AbyssPolicy.NONE))
 
 
-def call(img, layer, mode, strength=50.0, only_face=True):
+def call(img, layer, mode, strength=50.0, only_face=True, flash=False):
     proc = pdb.lookup_procedure("python-fu-de-shine")
     if proc is None:
         die("procedure missing")
@@ -33,6 +33,7 @@ def call(img, layer, mode, strength=50.0, only_face=True):
     cfg.set_property("mode", mode)
     cfg.set_property("strength", strength)
     cfg.set_property("only-face", only_face)
+    cfg.set_property("flash", flash)
     return proc.run(cfg)
 
 
@@ -40,11 +41,11 @@ def ok(res):
     return "SUCCESS" in str(res.index(0)).upper()
 
 
-for mode in ("beginner", "pro"):
+for mode in ("beginner", "pro", "flash"):
     img = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(SRC))
     photo = img.get_layers()[0]
     before = px(photo)
-    res = call(img, photo, mode)
+    res = call(img, photo, "pro" if mode == "pro" else "beginner", flash=(mode == "flash"))
     if not ok(res):
         die("%s status %s" % (mode, res.index(0)))
     if px(photo) != before:
@@ -78,6 +79,10 @@ for mode in ("beginner", "pro"):
     print("DESHINE_TEST strong px %d mean luma drop %.2f" % (n, d / max(n, 1)), flush=True)
     if n == 0 or d / n < 3:
         die("highlights not reduced")
+    neck = max(mb[y * w + x] for y in range(2850, 3150, 5) for x in range(500, 800, 5))
+    print("DESHINE_TEST neck mask max %d" % neck, flush=True)
+    if neck != 0:
+        die("neck processed")
     if mode == "pro":
         bl = img.get_layers()[0]
         if max(px(bl.get_mask(), "Y' u8")) != 0:

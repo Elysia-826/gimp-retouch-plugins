@@ -178,9 +178,9 @@ def main(argv):
         # flash hotspots: the whole near-white spot gets (near) full mask, its soft
         # rim included, no matter how strong the nose shine is that sets the peak
         hotm = (clipped * (allow > 0.2)).astype(np.uint8)
-        rim = max(3, int(scale * 0.35)) | 1
+        rim = max(3, int(scale * 0.9)) | 1   # spot glow fades well beyond the clipped core
         hotm = cv2.dilate(hotm, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (rim, rim))).astype(np.float32)
-        mask = np.maximum(mask, np.clip(_blur(hotm, scale * 0.12) * 1.3, 0, 1) * np.clip(allow * 2, 0, 1))
+        mask = np.maximum(mask, np.clip(_blur(hotm, scale * 0.25) * 1.3, 0, 1) * np.clip(allow * 2, 0, 1))
     mask[mask < 0.03] = 0.0
 
     # corrected low-frequency: pull L and colour toward the local skin tone.
@@ -202,7 +202,7 @@ def main(argv):
     grain = lab[:, :, 0] - _blur(lab[:, :, 0], max(1.0, scale * 0.06))
     flat = np.sqrt(_blur(grain ** 2, scale * 0.2))
     gone = np.clip((0.45 - flat) / 0.25, 0, 1)
-    tex_need = np.clip(_blur(clipped * gone, scale * 0.1) * 1.5, 0, 1) * mask
+    tex_need = np.clip(_blur(clipped, scale * 0.1) * 1.5, 0, 1) * mask * np.clip(gone * 2.0 + 0.5, 0, 1)
     borrow = None
     if flash and tex_need.max() > 0.01:
         src = np.zeros((h, w), np.float32)
@@ -211,21 +211,42 @@ def main(argv):
         dL = grain
         src_ok = ((clipped < 0.5) & (skin > 0) & (region > 0) & (flat > 0.4) & (flat < 1.8)
                   & (lab[:, :, 0] > med - 12)).astype(np.uint8)
-        for k in (0.9, 1.8, 2.7, 3.6, 4.5):
-            d = max(3, int(scale * k))
-            for dx, dy in ((d, 0), (-d, 0), (0, d), (0, -d), (d, d), (-d, d), (d, -d), (-d, -d)):
-                sh = np.roll(np.roll(dL, dy, 0), dx, 1)
-                ok = (np.roll(np.roll(src_ok, dy, 0), dx, 1) > 0) & (got < 0.5) & (tex_need > 0.01)
-                src[ok] = sh[ok]
-                got[ok] = 1.0
+        # random offsets, chosen per small block with a random priority, so the
+        # borrowed grain has no radial/annular structure (fixed seed: repeatable)
+        rng = np.random.default_rng(0)
+        blk = max(4, int(scale * 0.5))
+        by_n, bx_n = h // blk + 1, w // blk + 1
+        best = np.full((h, w), np.inf, np.float32)
+        for _ in range(80):
+            ang = rng.uniform(0, 2 * np.pi)
+            dist = rng.uniform(0.9, 4.5) * scale
+            dx, dy = int(round(np.cos(ang) * dist)), int(round(np.sin(ang) * dist))
+            pri = rng.random((by_n, bx_n)).astype(np.float32)
+            pri = np.repeat(np.repeat(pri, blk, 0), blk, 1)[:h, :w]
+            sh = np.roll(np.roll(dL, dy, 0), dx, 1)
+            ok = (np.roll(np.roll(src_ok, dy, 0), dx, 1) > 0) & (tex_need > 0.01) & (pri < best)
+            src[ok] = sh[ok]
+            best[ok] = pri[ok]
+            got[ok] = 1.0
         borrow = 1.0 * tex_need * got * src
     out_lab = base + (new - base) * reach + detail
     # hard cap on the final pixel, then grain is untouched (detail added as-is)
-    out_lab[:, :, 0] = np.maximum(out_lab[:, :, 0], lab[:, :, 0] - 12.3)
+    # cap floor follows a smoothed copy of the photo inside flat clipped spots, so the
+    # 8-bit contour steps of a soft white spot do not come through as rings
+    floor_src = lab[:, :, 0]
+    if flash:
+        # inside flat white spots the photo's own "detail" is only 8-bit contour
+        # steps of the white gradient; once darkened they read as rings. Drop it
+        # there (the borrowed grain replaces it) and smooth the cap floor too.
+        fl = tex_need
+        sm = _blur(out_lab[:, :, 0], max(1.5, scale * 0.08))
+        out_lab[:, :, 0] = out_lab[:, :, 0] * (1 - fl) + sm * fl
+        floor_src = floor_src * (1 - fl) + _blur(floor_src, max(1.5, scale * 0.08)) * fl
+    out_lab[:, :, 0] = np.maximum(out_lab[:, :, 0], floor_src - (11.0 if flash else 12.3))
     if borrow is not None:
         # borrowed grain goes on after the cap so it is not flattened against it
         out_lab[:, :, 0] += borrow
-    out_lab[:, :, 0] = np.clip(np.maximum(out_lab[:, :, 0], lab[:, :, 0] - 13.0), 0, 100)
+    out_lab[:, :, 0] = np.clip(np.maximum(out_lab[:, :, 0], lab[:, :, 0] - 12.5), 0, 100)
     out_bgr = cv2.cvtColor(out_lab.astype(np.float32), cv2.COLOR_LAB2BGR)
     out_rgb = np.clip(out_bgr[:, :, ::-1] * 255.0 + 0.5, 0, 255).astype(np.uint8)
     # nothing moves where the correction does not reach (avoids Lab round-trip drift)

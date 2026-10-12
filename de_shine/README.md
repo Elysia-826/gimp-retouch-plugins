@@ -19,8 +19,8 @@
 4. 原图层不改；结果都是新图层 + 蒙版。
 
 ## 测试
-`gimp-console-3.0 -i --quit --batch-interpreter=python-fu-eval -b "exec(open('de_shine/test_deshine.py').read())"`
-（`DESHINE_TEST_IMAGE` 指定测试照片）。只在盒子上的 GIMP 3.0.4 无界面测过；Windows GIMP 3.2.6 和对话框没测过。
+`gimp-console-3.0 -i --quit --batch-interpreter=python-fu-eval -b "exec(open('tests/de_shine/test_deshine.py').read())"`
+（另有 `tests/de_shine/test_strength.py`、`measure_helper.py`；`DESHINE_TEST_IMAGE` 指定测试照片）。只在盒子上的 GIMP 3.0.4 无界面测过；Windows GIMP 3.2.6 和对话框没测过。
 
 ## 已知限制
 - 额头、脸颊上很淡的油光不一定抓得到，可调高灵敏度、勾「闪光灯硬光」，或用专业模式的画笔补。

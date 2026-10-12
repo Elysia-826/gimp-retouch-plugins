@@ -59,7 +59,7 @@ for mode in ("beginner", "pro", "flash"):
     m = auto.get_mask()
     if m is None:
         die("no mask")
-    mb = px(m, "Y' u8")
+    mb = px(m, "Y u8")  # linear, what GIMP composites with
     mx = max(mb)
     cover = sum(1 for v in mb[::7] if v > 20) * 7.0 / len(mb)
     print("DESHINE_TEST mask max %d cover %.3f" % (mx, cover), flush=True)

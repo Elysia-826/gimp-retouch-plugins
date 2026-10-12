@@ -1,11 +1,11 @@
 # gimp-retouch-plugins installer for Windows -- tested on Windows 11 + GIMP 3.2.6 (headless, 2026-10-08); GUI dialogs 尚未人工验证
 # Installs the components YOU choose into %APPDATA%\GIMP\<ver>\ (user profile only, no admin needed):
-#   ours:        fsep_oneclick, dnb_setup, batch_export, mesh_liquify, spot_heal, dnb_flow, subject_mask, action_record, portrait_brush
+#   ours:        fsep_oneclick, dnb_setup, batch_export, mesh_liquify, spot_heal, dnb_flow, subject_mask, de_shine, action_record, portrait_brush
 #   third-party: gmic, resynthesizer, batcher, adjustment-layer    (downloaded, sha256-checked)
 #   opt-in:      photogimp  (overwrites layout/shortcuts/tool presets; keeps your language/theme/icon gimprc settings)
 #   app:         rawtherapee (official per-user installer, no admin, into -RawTherapeeDir\<version>; GIMP's RAW importer is pointed at it)
 #   helper:      helper-python (private embeddable Python 3.12 + numpy + opencv-python-headless in -HelperPythonDir, no admin;
-#                GIMP's own Python cannot load OpenCV wheels. subject_mask needs it; mesh_liquify's face mode uses it.)
+#                GIMP's own Python cannot load OpenCV wheels. subject_mask and de_shine need it; mesh_liquify's face mode uses it.)
 #   Requirements are added automatically: subject_mask -> mesh_liquify (face model) + helper-python; spot_heal -> resynthesizer.
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -List
@@ -42,6 +42,7 @@ $C = [ordered]@{
   "spot_heal"       = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("spot_heal\spot_heal.py"); procs=@("python-fu-spot-heal") }
   "dnb_flow"        = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("dnb_flow\dnb_flow.py"); procs=@("python-fu-dnb-flow") }
   "subject_mask"    = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("subject_mask\subject_mask.py","subject_mask\subject_select.py"); procs=@("python-fu-subject-select") }
+  "de_shine"        = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("de_shine\de_shine.py","de_shine\deshine_helper.py"); procs=@("python-fu-de-shine") }
   "action_record"   = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("action_record\action_record.py","action_record\store.py","action_record\layers.py"); procs=@("python-fu-action-record-start","python-fu-action-record-stop","python-fu-action-play") }
   "portrait_brush"  = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("portrait_brush\portrait_brush.py"); procs=@("python-fu-portrait-brush")
                          brushdir="portrait-retouch"; brushes=@("portrait_brush\brushes\portrait-soft-round.vbr","portrait_brush\brushes\portrait-skin-pores.gbr","portrait_brush\brushes\portrait-hair-strand.gih") }
@@ -78,9 +79,9 @@ $C = [ordered]@{
                            @{ file="numpy-2.5.3-cp312-cp312-win_amd64.whl"; sha="0a59a421a32580a009e8a1751345bf829631b990dc1794b80514ab722b435def"; pypi="numpy" },
                            @{ file="opencv_python_headless-5.0.0.93-cp37-abi3-win_amd64.whl"; sha="829717b6a95554f273e49e357cee3b3a2a26b6f4842fbc1bed2b45bdd8f87e0e"; pypi="opencv-python-headless" }) }
 }
-$Requires = @{ "subject_mask"=@("mesh_liquify","helper-python"); "spot_heal"=@("resynthesizer") }
+$Requires = @{ "subject_mask"=@("mesh_liquify","helper-python"); "de_shine"=@("mesh_liquify","helper-python"); "spot_heal"=@("resynthesizer") }
 $Recommends = @{ "mesh_liquify"="helper-python (face mode)" }
-$Sets = @{ "ours"=@("fsep_oneclick","dnb_setup","batch_export","mesh_liquify","spot_heal","dnb_flow","subject_mask","action_record","portrait_brush"); "third-party"=@("gmic","resynthesizer","batcher","adjustment-layer") }
+$Sets = @{ "ours"=@("fsep_oneclick","dnb_setup","batch_export","mesh_liquify","spot_heal","dnb_flow","subject_mask","de_shine","action_record","portrait_brush"); "third-party"=@("gmic","resynthesizer","batcher","adjustment-layer") }
 $Sets["all"] = $Sets["ours"] + $Sets["third-party"]
 
 if ($List) {

@@ -174,6 +174,13 @@ def main(argv):
     # normalise: the strongest shine is full mask, so strength 50 = peak 128
     peak = float(mask.max())
     mask = np.clip(mask / peak, 0, 1) if peak > 0.05 else mask * 0.0
+    if flash:
+        # flash hotspots: the whole near-white spot gets (near) full mask, its soft
+        # rim included, no matter how strong the nose shine is that sets the peak
+        hotm = (clipped * (allow > 0.2)).astype(np.uint8)
+        rim = max(3, int(scale * 0.35)) | 1
+        hotm = cv2.dilate(hotm, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (rim, rim))).astype(np.float32)
+        mask = np.maximum(mask, np.clip(_blur(hotm, scale * 0.12) * 1.3, 0, 1) * np.clip(allow * 2, 0, 1))
     mask[mask < 0.03] = 0.0
 
     # corrected low-frequency: pull L and colour toward the local skin tone.
@@ -211,7 +218,7 @@ def main(argv):
                 ok = (np.roll(np.roll(src_ok, dy, 0), dx, 1) > 0) & (got < 0.5) & (tex_need > 0.01)
                 src[ok] = sh[ok]
                 got[ok] = 1.0
-        borrow = 0.6 * tex_need * got * src
+        borrow = 1.0 * tex_need * got * src
     out_lab = base + (new - base) * reach + detail
     # hard cap on the final pixel, then grain is untouched (detail added as-is)
     out_lab[:, :, 0] = np.maximum(out_lab[:, :, 0], lab[:, :, 0] - 12.3)

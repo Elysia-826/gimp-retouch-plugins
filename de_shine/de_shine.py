@@ -283,7 +283,7 @@ def _new_layer(image, layer, name, rgb, maskbytes):
     nl.add_mask(m)
     if maskbytes is not None:
         mb = m.get_buffer()
-        mb.set(Gegl.Rectangle.new(0, 0, w, h), "Y' u8", maskbytes)
+        mb.set(Gegl.Rectangle.new(0, 0, w, h), "Y u8", maskbytes)
         mb.flush()
         m.update(0, 0, w, h)
     return nl, m

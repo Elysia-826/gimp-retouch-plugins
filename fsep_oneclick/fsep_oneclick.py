@@ -126,6 +126,7 @@ def run(procedure, run_mode, image, drawables, config, data):
         GimpUi.init(PROC)
         dlg = GimpUi.ProcedureDialog.new(procedure, config, "一键频率分离 / Frequency Separation")
         dlg.fill(["radius"])
+        _add_help(dlg)
         ok = dlg.run(); dlg.destroy()
         if not ok:
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, None)
@@ -135,6 +136,29 @@ def run(procedure, run_mode, image, drawables, config, data):
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
+
+HELP_TEXT = ("把照片拆成两层：「低频」管颜色和明暗，「高频」管毛孔纹理。\n"
+             "用法：选中照片图层，点确定；磨皮、修色涂低频，修瑕疵涂高频，两边互不影响。\n"
+             "安全：原图被隐藏保留在下面，不会被改动；模糊半径填 0 会按图片大小自动算。")
+
+
+def _add_help(dlg):
+    """Short usage text at the top of the dialog. Never blocks the dialog if Gtk differs."""
+    try:
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gtk
+        lab = Gtk.Label(label=HELP_TEXT)
+        lab.set_line_wrap(True)
+        lab.set_max_width_chars(46)
+        lab.set_xalign(0.0)
+        lab.set_margin_bottom(8)
+        box = dlg.get_content_area()
+        box.pack_start(lab, False, False, 0)
+        box.reorder_child(lab, 0)
+        lab.show()
+    except Exception:
+        pass
+
 
 class FSep(Gimp.PlugIn):
     def do_set_i18n(self, name):
@@ -151,7 +175,7 @@ class FSep(Gimp.PlugIn):
         p.set_documentation("Split layer into Low (blur) and High (grain-merge texture) layers in a group. 将图层分离为低频与高频。",
                             "Original layer is hidden and kept untouched below the group. Radius 0 = auto: 6 px * long side / 4000, clamped 2..30.", name)
         p.set_attribution("Elysia", "Elysia", "2026")
-        p.add_double_argument("radius", "Blur radius / 模糊半径 (0=auto: 6*long/4000)", "Low-frequency gaussian radius in px",
+        p.add_double_argument("radius", "Blur radius / 模糊半径 (0=auto: 6*long/4000)", "低频层的模糊程度（像素）。越大，低频越糊、高频里留下的细节越多。0 = 自动",
                               0.0, 200.0, 0.0, GObject.ParamFlags.READWRITE)
         return p
 

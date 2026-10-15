@@ -715,7 +715,7 @@ def build_deshine(image, top, rank, title):
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
-    return ("已建去油光层（只压暗，不带原图像素，之后改高低频也不会被盖掉），蒙版全黑。白色软画笔 20% 在油光上轻涂。"
+    return ("已建去油光层（只压暗，不会把之前的修图盖掉），蒙版全黑。白色软画笔 20% 在油光上轻涂。"
             + (" 没设上：" + "、".join(notes) if notes else ""))
 
 
@@ -845,7 +845,7 @@ def build_workspace(image, key):
             _black_mask(up)
             _select_mask(image, up)
             notes = brush_setup(image, 20.0)
-            msg = "已建「提亮」「压暗」两层（柔光，不带原图像素），蒙版全黑。选中了提亮的蒙版：白色软画笔 20% 轻涂。"
+            msg = "已建「提亮」「压暗」两层（柔光，不会把之前的修图盖掉），蒙版全黑。选中了提亮的蒙版：白色软画笔 20% 轻涂。"
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
@@ -972,25 +972,25 @@ HELP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "help")
 BUTTON_HELP = {
     "开始修这张": ("备份一份原图并锁住，建「插件改动」组。\n不用涂，点一下就行。\n每张图第一步先点它。", None),
     "去除瑕疵": ("建空的修复层，切到修复画笔。\n按住 Ctrl 点干净皮肤取样，再点痘痘、斑点。\n先去瑕疵，再做别的。", None),
-    "去油光": ("压暗反光的油亮处，不带原图像素。\n蒙版全黑，白色软画笔 20% 在额头、鼻头、下巴的亮斑上轻涂。\n脸上反光明显时用。", "deshine"),
-    "高低频": ("把照片拆成颜色明暗（低频）和纹理（高频）两层。\n低频用软笔刷涂匀色块；高频用修复/仿制修纹理。\n要细修皮肤时用，会替换照片层。", None),
+    "去油光": ("压暗反光的油亮处；只压暗，不会把之前的修图盖掉。\n蒙版全黑，白色软画笔 20% 在额头、鼻头、下巴的亮斑上轻涂。\n脸上反光明显时用。", "deshine"),
+    "高低频": ("把照片拆成两层：低频管颜色和明暗，高频管毛孔纹理。\n低频用软笔刷涂匀色块；高频用修复/仿制修纹理。\n原图有备份，不会丢。要细修皮肤时用。", None),
     "加深减淡": ("建「提亮」「压暗」两层，蒙版全黑。\n白色软画笔低不透明度：亮的地方涂压暗，暗的地方涂提亮。\n修凹凸不平、塑造轮廓时用。", "dnb"),
     "轻柔涂抹": ("在加深减淡层上按很低的流量慢慢涂。\n来回多涂几次叠加效果。\n做完「加深减淡」后用。", None),
     "磨皮": ("还没做。", None),
-    "皮肤减红": ("降低皮肤的红色，不会发亮。\n蒙版全黑，白色软画笔 20% 在发红的脸颊、鼻翼轻涂。\n泛红、痘印红时用。", "dered"),
+    "皮肤减红": ("降低皮肤的红色，不会发亮。\n蒙版全黑，白色软画笔在发红的脸颊、鼻翼轻涂。\n涂满会发灰，20% 轻涂即可。", "dered"),
     "统一肤色": ("把皮肤颜色轻轻往统一的肤色靠，保留纹理。\n蒙版全黑，白色软画笔 20% 在色块不匀的地方轻涂。\n脸上颜色深一块浅一块时用。", "unify"),
-    "按脸液化": ("自动找到脸，用滑块调眼睛大小、下颌、鼻宽。\n不用涂，拖滑块看预览。\n想整体微调脸型时用。", None),
-    "液化": ("网格液化：推、膨胀、收缩、旋转、还原。\n在对话框里用笔刷拖动。\n局部修形（发际、轮廓）时用，幅度要小。", None),
-    "眼部修饰": ("提亮眼白、去红血丝，单独提亮瞳孔。\n先框选眼睛再点；白色软画笔涂眼白，瞳孔在「瞳孔提亮」组蒙版上涂。\n眼睛发灰、发红时用。", "eye"),
-    "牙齿美白": ("提亮牙齿并去黄，不会变成死白。\n先框选牙齿再点，白色软画笔 20% 只涂牙齿。\n牙齿偏黄偏暗时用。", "teeth"),
-    "卧蚕压色": ("把眼下发暗发青的地方压暗并去色。\n蒙版全黑，白色软画笔 20% 沿卧蚕轻涂。\n卧蚕/眼下颜色太重时用。", "undereye"),
-    "选择主体": ("把整个人或脸部皮肤做成选区（边缘略虚）。\n不用涂，在对话框里选范围。\n只想改人或只改背景时用。", None),
-    "人像笔刷": ("一键设好修图常用的笔刷、大小和低不透明度。\n选好用途后直接在蒙版上涂。\n换不同修图步骤时用。", None),
+    "按脸液化": ("自动找到脸，用滑块调眼睛大小、下颌、鼻宽。\n点了会弹出对话框，不用涂，拖滑块看预览。\n想整体微调脸型时用。", None),
+    "液化": ("网格液化：推、膨胀、收缩、旋转、还原。\n点了会弹出对话框，在里面用笔刷拖动。\n局部修形（发际、轮廓）时用，幅度要小。", None),
+    "眼部修饰": ("先框选眼睛再点；白色软画笔涂眼白（提亮、去红血丝）。\n瞳孔：在图层面板点「瞳孔提亮」组的蒙版，再在瞳孔上涂。\n⚙ 调力度，默认眼白 28、瞳孔 30。", "eye"),
+    "牙齿美白": ("提亮牙齿并去黄，不会变成死白。只在露出牙齿的照片上用。\n先框选牙齿再点；选区只圈牙齿，别圈到嘴唇。\n白色软画笔 20% 只涂牙齿。", None),
+    "卧蚕压色": ("把眼下发暗发青的地方压暗并去色。蒙版全黑，白色软画笔沿卧蚕涂。\n涂满会很重，只用 20% 轻涂一两遍；\n觉得重就点 ⚙ 调小。", "undereye"),
+    "选择主体": ("把整个人或脸部皮肤做成选区（边缘略虚）。\n点了会弹出对话框，在里面选范围，不用涂。\n只想改人或只改背景时用。", None),
+    "人像笔刷": ("点开后选步骤，笔刷大小和不透明度自动设好。\n选好后直接在蒙版上涂。\n换不同修图步骤时用。", None),
     "看看涂到哪了": ("把选中层的蒙版显示成半透明红色。\n再点一下关闭。\n想检查有没有漏涂、涂出界时用。", None),
     "涂擦切换": ("前景、背景色互换（同 X 键）。\n白色=涂上效果，黑色=擦掉效果。\n涂多了想擦回来时用。", None),
     "播放动作": ("播放之前录好的一串操作。\n不用涂。\n多张照片要重复同样步骤时用。", None),
-    "锐化": ("新建一层轻微锐化，蒙版全黑，白色涂哪里哪里变锐。\n轻涂眼睛、头发、衣服边缘，皮肤少涂。\n一定最后再涂：它是当时画面的快照，之后的改动不会被锐化。", "sharpen"),
-    "导出": ("批量导出 JPEG/WebP/PNG，可缩放、锐化、加水印。\n不用涂。\n全部修完最后一步用。", None),
+    "锐化": ("新建一层轻微锐化（是点按钮那一刻画面的拷贝）。\n蒙版全黑，白色软画笔轻涂眼睛、头发、衣服边缘，皮肤少涂。\n一定所有步骤做完再点、再涂，否则之后的修改在涂过的地方会被盖掉。", "sharpen"),
+    "导出": ("批量导出 JPEG/WebP/PNG，可缩放、锐化、加水印。\n点了会弹出对话框，不用涂。\n全部修完最后一步用。", None),
 }
 
 
@@ -1223,8 +1223,11 @@ class Panel:
         d.add_button("知道了", Gtk.ResponseType.CLOSE)
         box = d.get_content_area()
         box.set_spacing(6)
+        box.set_border_width(12)
+        d.set_default_size(420, -1)
         lab = Gtk.Label(label=help_text(label, "暂无说明"))
-        lab.set_line_wrap(True); lab.set_xalign(0.0); lab.set_max_width_chars(36)
+        lab.set_line_wrap(True); lab.set_xalign(0.0)
+        lab.set_width_chars(30); lab.set_max_width_chars(40)
         box.pack_start(lab, False, False, 4)
         th = help_thumbs(label)
         if th:
@@ -1235,7 +1238,7 @@ class Panel:
                 col.pack_start(Gtk.Label(label=cap), False, False, 0)
                 row.pack_start(col, False, False, 0)
             box.pack_start(row, False, False, 0)
-            note = Gtk.Label(label="示例为蒙版涂满白色的效果；实际用 20% 软画笔轻涂会更自然。")
+            note = Gtk.Label(label="示例只作参考；实际用 20%～30% 软画笔轻涂，效果以你涂的为准。")
             note.set_line_wrap(True); note.set_xalign(0.0); note.get_style_context().add_class("pp-help")
             box.pack_start(note, False, False, 0)
         d.connect("response", lambda w, _r: w.destroy())
@@ -1247,6 +1250,7 @@ class Panel:
         d.add_buttons("取消", Gtk.ResponseType.CANCEL, "确定", Gtk.ResponseType.OK)
         box = d.get_content_area()
         box.set_spacing(6)
+        box.set_border_width(12)
         lab = Gtk.Label(label="数值越大，涂满时越亮。眼白默认 28，瞳孔默认 30；改了会同时用到已建好的图层。")
         lab.set_line_wrap(True)
         box.pack_start(lab, False, False, 0)
@@ -1273,6 +1277,7 @@ class Panel:
         d.add_buttons("取消", Gtk.ResponseType.CANCEL, "确定", Gtk.ResponseType.OK)
         box = d.get_content_area()
         box.set_spacing(6)
+        box.set_border_width(12)
         lab = Gtk.Label(label=help_text)
         lab.set_line_wrap(True)
         box.pack_start(lab, False, False, 0)
@@ -1300,7 +1305,7 @@ class Panel:
         try:
             fg = Gimp.context_get_foreground().get_rgba()
             lum = 0.3 * fg[0] + 0.6 * fg[1] + 0.1 * fg[2]
-            self.swap_btn.set_label("涂擦切换\n当前：%s" % ("白=涂" if lum >= 0.5 else "黑=擦"))
+            self.swap_btn.set_label("涂擦：%s" % ("白=涂" if lum >= 0.5 else "黑=擦"))
         except Exception:
             pass
 

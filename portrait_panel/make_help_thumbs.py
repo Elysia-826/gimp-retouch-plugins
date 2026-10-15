@@ -17,14 +17,21 @@ CHEEK = ("ell", (1260, 1960, 300, 320))      # right cheek (viewer's right), bel
 CHEEK_CROP = (1130, 1830, 560, 560)
 # key: (workspace, selection made before the click or None, feathered mask fill, crop rect)
 JOBS = {
-    "dered":    ("ws:dered",    None, CHEEK, CHEEK_CROP),
-    "unify":    ("ws:unify",    None, CHEEK, CHEEK_CROP),
-    "dnb":      ("ws:dnb",      None, CHEEK, CHEEK_CROP),
-    "deshine":  ("ws:deshine",  None, ("ell", (800, 1820, 170, 420)), (640, 1780, 500, 500)),
-    "undereye": ("ws:undereye", None, ("ell", (450, 1705, 330, 80)), (380, 1560, 440, 280)),
+    "dered":    ("ws:dered",    None, "strokes", CHEEK_CROP),
+    "unify":    ("ws:unify",    None, CHEEK, (1250, 1950, 300, 300)),   # tighter crop, max-strength fill
+    "dnb":      ("ws:dnb",      None, "strokes", CHEEK_CROP),
+    "deshine":  ("ws:deshine",  None, ("ell", (800, 1820, 170, 420)), (760, 1880, 260, 260)),   # tighter
+    "undereye": ("ws:undereye", None, "strokes", (380, 1560, 440, 280)),
     "eye":      ("ws:eye", ("ell", (400, 1595, 390, 115)), ("ell", (400, 1595, 390, 115)), (380, 1560, 440, 280)),
-    "teeth":    ("ws:teeth", ("ell", (720, 2500, 480, 170)), ("ell", (720, 2500, 480, 170)), (660, 2440, 600, 320)),
-    "sharpen":  ("ws:sharpen",  None, ("rect", (480, 1580, 240, 160)), (480, 1580, 240, 160)),   # 1:1 crop, eye
+    # teeth: no thumbnail (test photo has a closed mouth) -> text-only help
+    "sharpen":  ("ws:sharpen",  None, ("rect", (480, 1580, 240, 160)), (540, 1620, 120, 80)),   # 2x zoom on the eye
+}
+
+# ~30% soft-brush strokes (feathered elongated dabs, filled at 30% opacity, overlapping like 2-3 passes)
+STROKES = {
+    "dered":    [(1290, 2000, 220, 70), (1320, 2080, 200, 70), (1300, 2160, 180, 60)],
+    "dnb":      [(1290, 2000, 220, 70), (1320, 2080, 200, 70), (1300, 2160, 180, 60)],
+    "undereye": [(470, 1710, 290, 50), (500, 1725, 230, 40)],
 }
 
 
@@ -51,11 +58,20 @@ for key, (ws, sel, fill, crop) in JOBS.items():
         msg = pp.build_workspace(img, ws)
         tgt = img.get_selected_layers()[0]
         m = tgt.get_mask()
-        Gimp.context_push(); Gimp.context_set_opacity(100.0)
+        Gimp.context_push()
         Gimp.context_set_foreground(Gegl.Color.new("white"))
-        select(img, *fill)
-        Gimp.Selection.feather(img, 0 if key == "sharpen" else 40.0)
-        m.edit_fill(Gimp.FillType.FOREGROUND); Gimp.Selection.none(img)
+        if fill == "strokes":
+            Gimp.context_set_opacity(30.0)
+            for r in STROKES[key]:
+                select(img, "ell", r)
+                Gimp.Selection.feather(img, 30.0)
+                m.edit_fill(Gimp.FillType.FOREGROUND)
+        else:
+            Gimp.context_set_opacity(100.0)
+            select(img, *fill)
+            Gimp.Selection.feather(img, 0 if key == "sharpen" else 40.0)
+            m.edit_fill(Gimp.FillType.FOREGROUND)
+        Gimp.Selection.none(img)
         Gimp.context_pop()
         save_crop(img, crop, os.path.join(OUT, key + "_after.jpg"))
         print("HELP ok", key, tgt.get_name(), flush=True)

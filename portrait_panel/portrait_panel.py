@@ -14,7 +14,8 @@ import gi
 gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gimp, GimpUi, GObject, GLib, Gtk, Gdk
+gi.require_version("Gegl", "0.4")
+from gi.repository import Gimp, GimpUi, GObject, GLib, Gtk, Gdk, Gegl
 
 PROC = "python-fu-portrait-panel"
 GROUP_NAME = "插件改动"
@@ -32,21 +33,25 @@ GROUPS = [
         ("加深减淡", "ws:dnb", "建「提亮」「压暗」两层，蒙版全黑，白色涂=生效。⚙ = 旧的 50% 灰加深减淡搭建"),
         ("轻柔涂抹", "python-fu-dnb-flow", "在加深减淡层上按流量轻涂"),
         ("磨皮", None, "还没做"),
+        ("皮肤减红/统一肤色", None, "还没做"),
     ]),
     ("face", "五官", [
         ("按脸液化", "python-fu-mesh-liquify-face", "自动认脸，滑动调眼睛、下颌、鼻宽"),
         ("液化", "python-fu-mesh-liquify", "推移、膨胀、收缩、旋转、还原"),
         ("亮眼", None, "还没做"),
         ("白牙", None, "还没做"),
+        ("卧蚕压色", None, "还没做"),
     ]),
     ("aux", "辅助", [
         ("选出主体", "python-fu-subject-select", "把人或脸部皮肤做成选区"),
         ("人像笔刷", "python-fu-portrait-brush", "一键设好修图常用笔刷"),
+        ("看看涂到哪了", "__preview__", "把选中层的蒙版显示成半透明红色；再点一下关闭"),
+        ("涂擦切换", "__swap__", "前景/背景色互换（同 X 键）：白=涂，黑=擦"),
         ("播放动作", "python-fu-action-play", "播放录好的动作"),
     ]),
     ("last", "最后", [
-        ("批量导出", "python-fu-batch-export", "导出 JPEG/WebP/PNG"),
         ("锐化输出", None, "还没做"),
+        ("批量导出", "python-fu-batch-export", "导出 JPEG/WebP/PNG"),
     ]),
 ]
 
@@ -199,7 +204,20 @@ def _find_child(group, name):
 def _new_group(image, name):
     g = Gimp.GroupLayer.new(image, name) if hasattr(Gimp, "GroupLayer") else Gimp.Layer.group_new(image)
     g.set_name(name)
+    g.set_mode(Gimp.LayerMode.PASS_THROUGH)
     return g
+
+
+def _solid_layer(image, name, color, mode, opacity):
+    lay = Gimp.Layer.new(image, name, image.get_width(), image.get_height(),
+                         Gimp.ImageType.RGB_IMAGE, opacity, mode)
+    Gimp.context_push()
+    try:
+        Gimp.context_set_foreground(_color(color))
+        lay.fill(Gimp.FillType.FOREGROUND)
+    finally:
+        Gimp.context_pop()
+    return lay
 
 
 def _black_mask(layer):
@@ -266,7 +284,14 @@ def build_workspace(image, key):
         # fsep builds its group above the photo and hides the photo (composite unchanged)
         _run_noninteractive("python-fu-fsep-oneclick", image, photo, radius=0.0)
     if key == "ws:deshine":
-        _run_noninteractive("python-fu-de-shine", image, photo, mode="pro", strength=100.0)
+        # work on what is visible now (after 高低频/去瑕疵 edits), not the original photo,
+        # so the correction layer does not bring back old pixels where it is painted
+        vis = Gimp.Layer.new_from_visible(image, image, "去油光临时合并")
+        image.insert_layer(vis, None, 0)
+        try:
+            _run_noninteractive("python-fu-de-shine", image, vis, mode="pro", strength=100.0)
+        finally:
+            image.remove_layer(vis)
 
     image.undo_group_start()
     try:
@@ -327,25 +352,72 @@ def build_workspace(image, key):
         elif key == "ws:dnb":
             g = _new_group(image, title)
             _insert_ranked(image, top, g, rank)
-            down = photo.copy()
-            down.set_name(DNB_DOWN)
+            # solid white / black in soft light: no photo pixels, so they act on
+            # whatever is below (高低频, 去瑕疵 ...), like an adjustment
+            g.set_mode(Gimp.LayerMode.PASS_THROUGH)   # blend with the layers below, not inside the group
+            down = _solid_layer(image, DNB_DOWN, "black", Gimp.LayerMode.SOFTLIGHT, 70.0)
             image.insert_layer(down, g, 0)
-            down.set_mode(Gimp.LayerMode.MULTIPLY)
-            down.set_opacity(60.0)
             _black_mask(down)
-            up = photo.copy()
-            up.set_name(DNB_UP)
+            up = _solid_layer(image, DNB_UP, "white", Gimp.LayerMode.SOFTLIGHT, 70.0)
             image.insert_layer(up, g, 0)
-            up.set_mode(Gimp.LayerMode.SCREEN)
-            up.set_opacity(60.0)
             _black_mask(up)
             _select_mask(image, up)
             notes = brush_setup(image, 20.0)
-            msg = "已建「提亮」「压暗」两层，蒙版全黑（画面没变）。选中了提亮的蒙版：白色软画笔 20% 轻涂。"
+            msg = "已建「提亮」「压暗」两层（纯白/纯黑柔光，不带原图像素），蒙版全黑。选中了提亮的蒙版：白色软画笔 20% 轻涂。"
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
     return msg + (" 没设上：" + "、".join(notes) if notes else "")
+
+
+PREVIEW_NAME = "蒙版预览（再点一下关闭）"
+_preview_src = {}   # image id -> layer id whose mask is previewed
+
+
+def remove_previews(image):
+    n = 0
+    for l in list(image.get_layers()):
+        try:
+            if l.get_name() == PREVIEW_NAME:
+                image.remove_layer(l)
+                n += 1
+        except Exception:
+            continue
+    return n
+
+
+def toggle_preview(image):
+    """Red overlay of the selected layer's mask, at the very top (outside 插件改动).
+    Second call removes it and goes back to painting the mask."""
+    if remove_previews(image):
+        src = _preview_src.pop(image.get_id(), None)
+        lay = Gimp.Layer.get_by_id(src) if src is not None else None
+        if lay is not None and lay.is_valid():
+            _select_mask(image, lay)
+        Gimp.displays_flush()
+        return "已关闭蒙版预览，回到蒙版继续涂。"
+    sel = [l for l in image.get_selected_layers() if not l.is_group()]
+    if not sel or sel[0].get_mask() is None:
+        return "选中的图层没有蒙版，没法预览。"
+    src = sel[0]
+    m = src.get_mask()
+    _ok, ox, oy = src.get_offsets()
+    w, h = m.get_width(), m.get_height()
+    data = bytes(m.get_buffer().get(Gegl.Rectangle.new(0, 0, w, h), 1.0, "Y u8", Gegl.AbyssPolicy.NONE))
+    image.undo_group_start()
+    try:
+        pv = _solid_layer(image, PREVIEW_NAME, "#ff2020", Gimp.LayerMode.NORMAL, 50.0)
+        image.insert_layer(pv, None, 0)
+        pm = pv.create_mask(Gimp.AddMaskType.BLACK)
+        pv.add_mask(pm)
+        pm.get_buffer().set(Gegl.Rectangle.new(int(ox), int(oy), w, h), "Y u8", data)
+        pm.update(0, 0, image.get_width(), image.get_height())
+        _preview_src[image.get_id()] = src.get_id()
+        _select_mask(image, src)    # keep painting on the real mask
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return "红色 = 已经涂到的地方。再点一下关闭（关面板时也会自动删掉）。"
 
 
 # ---- layer helpers (used by later steps too) ----
@@ -369,6 +441,7 @@ def ensure_group(image):
     if not hasattr(Gimp, "GroupLayer"):
         g.set_name(GROUP_NAME)
     image.insert_layer(g, None, 0)
+    g.set_mode(Gimp.LayerMode.PASS_THROUGH)
     return g
 
 
@@ -463,10 +536,13 @@ class Panel:
                     need = {"ws:deshine": "python-fu-de-shine", "ws:fsep": "python-fu-fsep-oneclick"}.get(name)
                     ok = need is None or pdb.procedure_exists(need)
                 else:
-                    ok = name == "__start__" or (name is not None and pdb.procedure_exists(name))
+                    ok = name in ("__start__", "__preview__", "__swap__") or (name is not None and pdb.procedure_exists(name))
                 b.set_sensitive(ok)
                 b.set_tooltip_text(tip if ok else (tip if name is None else "没装：" + str(name)))
                 b.connect("clicked", self.on_button, name)
+                if name == "__swap__":
+                    self.swap_btn = b
+                    self.update_swap_label()
                 if name in WS:
                     cell = Gtk.Box(spacing=2)
                     cell.pack_start(b, True, True, 0)
@@ -537,6 +613,14 @@ class Panel:
             if name == "__start__":
                 self.status.set_text(start_retouch(image))
                 return
+            if name == "__preview__":
+                self.status.set_text(toggle_preview(image))
+                return
+            if name == "__swap__":
+                Gimp.context_swap_colors()
+                self.update_swap_label()
+                Gimp.displays_flush()
+                return
             if name in WS:
                 ok, state = Gtk.get_current_event_state()
                 if ok and (state & Gdk.ModifierType.SHIFT_MASK):
@@ -564,7 +648,21 @@ class Panel:
             self.status.set_text("出错：%s" % e)
         Gimp.displays_flush()
 
+    def update_swap_label(self):
+        try:
+            fg = Gimp.context_get_foreground().get_rgba()
+            lum = 0.3 * fg[0] + 0.6 * fg[1] + 0.1 * fg[2]
+            self.swap_btn.set_label("涂擦切换\n当前：%s" % ("白=涂" if lum >= 0.5 else "黑=擦"))
+        except Exception:
+            pass
+
     def on_close(self, *_):
+        for im in Gimp.get_images():
+            try:
+                remove_previews(im)
+            except Exception:
+                pass
+        Gimp.displays_flush()
         save_geometry(self.win)
         Gtk.main_quit()
         return False

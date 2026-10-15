@@ -10,3 +10,4 @@ dnb_flow
 subject_mask
 action_record
 portrait_brush
+portrait_panel

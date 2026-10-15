@@ -15,3 +15,4 @@ subject_mask
 action_record
 portrait_brush
 de_shine
+portrait_panel

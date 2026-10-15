@@ -1,6 +1,6 @@
 # gimp-retouch-plugins installer for Windows -- tested on Windows 11 + GIMP 3.2.6 (headless, 2026-10-08); GUI dialogs 尚未人工验证
 # Installs the components YOU choose into %APPDATA%\GIMP\<ver>\ (user profile only, no admin needed):
-#   ours:        fsep_oneclick, dnb_setup, batch_export, mesh_liquify, spot_heal, dnb_flow, subject_mask, de_shine, action_record, portrait_brush
+#   ours:        fsep_oneclick, dnb_setup, batch_export, mesh_liquify, spot_heal, dnb_flow, subject_mask, de_shine, portrait_panel, action_record, portrait_brush
 #   third-party: gmic, resynthesizer, batcher, adjustment-layer    (downloaded, sha256-checked)
 #   opt-in:      photogimp  (overwrites layout/shortcuts/tool presets; keeps your language/theme/icon gimprc settings)
 #   app:         rawtherapee (official per-user installer, no admin, into -RawTherapeeDir\<version>; GIMP's RAW importer is pointed at it)
@@ -43,6 +43,7 @@ $C = [ordered]@{
   "dnb_flow"        = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("dnb_flow\dnb_flow.py"); procs=@("python-fu-dnb-flow") }
   "subject_mask"    = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("subject_mask\subject_mask.py","subject_mask\subject_select.py"); procs=@("python-fu-subject-select") }
   "de_shine"        = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("de_shine\de_shine.py","de_shine\deshine_helper.py"); procs=@("python-fu-de-shine") }
+  "portrait_panel"  = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("portrait_panel\portrait_panel.py"); procs=@("python-fu-portrait-panel") }
   "action_record"   = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("action_record\action_record.py","action_record\store.py","action_record\layers.py"); procs=@("python-fu-action-record-start","python-fu-action-record-stop","python-fu-action-play") }
   "portrait_brush"  = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("portrait_brush\portrait_brush.py"); procs=@("python-fu-portrait-brush")
                          brushdir="portrait-retouch"; brushes=@("portrait_brush\brushes\portrait-soft-round.vbr","portrait_brush\brushes\portrait-skin-pores.gbr","portrait_brush\brushes\portrait-hair-strand.gih") }
@@ -79,9 +80,9 @@ $C = [ordered]@{
                            @{ file="numpy-2.5.3-cp312-cp312-win_amd64.whl"; sha="0a59a421a32580a009e8a1751345bf829631b990dc1794b80514ab722b435def"; pypi="numpy" },
                            @{ file="opencv_python_headless-5.0.0.93-cp37-abi3-win_amd64.whl"; sha="829717b6a95554f273e49e357cee3b3a2a26b6f4842fbc1bed2b45bdd8f87e0e"; pypi="opencv-python-headless" }) }
 }
-$Requires = @{ "subject_mask"=@("mesh_liquify","helper-python"); "de_shine"=@("mesh_liquify","helper-python"); "spot_heal"=@("resynthesizer") }
-$Recommends = @{ "mesh_liquify"="helper-python (face mode)" }
-$Sets = @{ "ours"=@("fsep_oneclick","dnb_setup","batch_export","mesh_liquify","spot_heal","dnb_flow","subject_mask","de_shine","action_record","portrait_brush"); "third-party"=@("gmic","resynthesizer","batcher","adjustment-layer") }
+$Requires = @{ "subject_mask"=@("mesh_liquify","helper-python"); "de_shine"=@("mesh_liquify","helper-python"); "portrait_panel"=@("fsep_oneclick","dnb_setup","de_shine","dnb_flow","mesh_liquify","subject_mask","portrait_brush","batch_export","action_record"); "spot_heal"=@("resynthesizer") }
+$Recommends = @{ "mesh_liquify"="helper-python (face mode)"; "portrait_panel"="spot_heal (⚙ of 去除瑕疵; needs resynthesizer)" }
+$Sets = @{ "ours"=@("fsep_oneclick","dnb_setup","batch_export","mesh_liquify","spot_heal","dnb_flow","subject_mask","de_shine","portrait_panel","action_record","portrait_brush"); "third-party"=@("gmic","resynthesizer","batcher","adjustment-layer") }
 $Sets["all"] = $Sets["ours"] + $Sets["third-party"]
 
 if ($List) {
@@ -91,7 +92,9 @@ if ($List) {
 $Sel = @(); foreach ($x in $Components) { $Sel += $x.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ } }
 if ($Only) { $Sel += $Sets[$Only] }
 $Sel = @($Sel | Select-Object -Unique)
-foreach ($x in @($Sel)) { foreach ($r in @($Requires[$x])) { if ($r -and $Sel -notcontains $r) { $Sel += $r; Write-Host "  + $r (needed by $x)" } } }
+do { $grew = $false   # repeat: a requirement can have its own requirements (portrait_panel -> de_shine -> helper-python)
+  foreach ($x in @($Sel)) { foreach ($r in @($Requires[$x])) { if ($r -and $Sel -notcontains $r) { $Sel += $r; $grew = $true; Write-Host "  + $r (needed by $x)" } } }
+} while ($grew)
 foreach ($x in @($Sel)) { if ($Recommends[$x] -and $Sel -notcontains ($Recommends[$x].Split(" ")[0])) { Write-Host "  hint: $x works better with $($Recommends[$x])" } }
 if (-not $Sel) { [Console]::Error.WriteLine("Nothing selected. Choose components with -Components a,b,c (see -List) or -Only ours|third-party|all."); exit 64 }
 $bad = @($Sel | Where-Object { -not $C.Contains($_) }); if ($bad) { [Console]::Error.WriteLine("Unknown component(s): $($bad -join ', ') (see -List)"); exit 64 }

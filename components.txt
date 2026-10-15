@@ -10,6 +10,7 @@ subject_mask     |ours       |mesh_liquify|-            |linux,windows|n|选出�
 action_record     |ours       |-          |fsep_oneclick,dnb_setup,subject_mask|linux,windows|n|动作录制：记下频率分离、加深减淡搭建和选出主体，按名字再播放（尚未人工验证）
 portrait_brush    |ours       |-          |fsep_oneclick,dnb_setup|linux,windows|n|人像笔刷：柔圆、皮肤毛孔、细发丝三支自制笔刷，一键设好加深减淡/皮肤纹理/修复仿制/发丝的笔刷、大小和低不透明度（尚未人工验证）
 de_shine          |ours       |mesh_liquify|-            |linux,windows|n|去油光：自动找出皮肤油光并压暗（只动低频，保留纹理），结果放在带蒙版的新图层；专业模式另给「去油光画笔」层手动涂（尚未人工验证）
+portrait_panel   |ours       |fsep_oneclick,dnb_setup,de_shine,dnb_flow,mesh_liquify,subject_mask,portrait_brush,batch_export,action_record|spot_heal    |linux,windows|n|人像面板：按修图顺序排好的按钮窗口，一键建去油光/高低频/加深减淡/去瑕疵的涂抹图层（蒙版全黑），附蒙版预览和涂擦切换（尚未人工验证）
 raw2tiff         |ours       |rawtherapee|batch_export |linux        |n|RAW 批量转 16 位 TIFF（rawtherapee-cli），安装为 ~/.local/bin/raw2tiff
 gmic             |third-party|-          |-            |linux        |n|G'MIC-Qt 滤镜合集（3.0 用 .deb，3.2 用 Flathub 扩展 + ICU77 包装）
 resynthesizer    |third-party|-          |-            |linux        |n|Resynthesizer 修复选区/纹理合成（3.0 源码编译 v3.0，3.2 用 Flathub 扩展）

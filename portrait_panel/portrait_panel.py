@@ -26,10 +26,10 @@ HELP = "从上往下按顺序点。先点「开始修这张」备份原图；灰
 GROUPS = [
     ("start", "开始", [("开始修这张", "__start__", "复制一份原图并锁住，建「插件改动」图层组，之后的改动都放进组里")]),
     ("skin", "皮肤", [
-        ("去油光", "python-fu-de-shine", "自动压暗油光，结果在带蒙版的新图层"),
-        ("点修复", "python-fu-spot-heal", "用周围纹理补掉小斑点"),
-        ("频率分离", "python-fu-fsep-oneclick", "拆成低频（颜色明暗）和高频（纹理）两层"),
-        ("加深减淡", "python-fu-dnb-setup", "建 50% 灰加深减淡层和观察层"),
+        ("去除瑕疵", "ws:heal", "建一个空的「去除瑕疵」层，切到修复画笔（Ctrl+点取样，再点斑）。⚙ = 点修复插件（填坐标自动补）"),
+        ("去油光", "ws:deshine", "建去油光层，蒙版全黑（画面不变），白色涂=去油光。⚙ = 去油光参数"),
+        ("高低频", "ws:fsep", "建高低频组，选中低频层并设好软画笔。⚙ = 频率分离参数"),
+        ("加深减淡", "ws:dnb", "建「提亮」「压暗」两层，蒙版全黑，白色涂=生效。⚙ = 旧的 50% 灰加深减淡搭建"),
         ("轻柔涂抹", "python-fu-dnb-flow", "在加深减淡层上按流量轻涂"),
         ("磨皮", None, "还没做"),
     ]),
@@ -93,6 +93,261 @@ def save_geometry(win):
         pass
 
 
+# workspace button -> (procedure for ⚙ / Shift+click, order rank inside 插件改动: higher = upper)
+WS = {
+    "ws:heal": ("python-fu-spot-heal", 1),
+    "ws:deshine": ("python-fu-de-shine", 2),
+    "ws:fsep": ("python-fu-fsep-oneclick", 0),   # replaces the photo, so it sits at the bottom
+    "ws:dnb": ("python-fu-dnb-setup", 4),
+}
+WS_NAMES = {
+    "ws:heal": "去除瑕疵（修复画笔：Ctrl+点取样，再点斑）",
+    "ws:deshine": "去油光（白色涂=去油光，黑色涂=擦掉）",
+    "ws:fsep": "高低频（低频：软笔刷修明暗颜色；高频：修复/仿制修纹理）",
+    "ws:dnb": "加深减淡",
+}
+DNB_UP = "提亮（白色涂=变亮，黑色涂=擦掉）"
+DNB_DOWN = "压暗（白色涂=变暗，黑色涂=擦掉）"
+
+
+def _color(name):
+    from gi.repository import Gegl
+    return Gegl.Color.new(name)
+
+
+def brush_setup(image, opacity=20.0, method="gimp-paintbrush", hardness_soft=True):
+    """Paintbrush, soft brush, FG white / BG black, low opacity. Returns notes on what failed."""
+    notes = []
+    calls = [
+        ("paint method", lambda: Gimp.context_set_paint_method(method)),
+        ("foreground", lambda: Gimp.context_set_foreground(_color("white"))),
+        ("background", lambda: Gimp.context_set_background(_color("black"))),
+        ("opacity", lambda: Gimp.context_set_opacity(float(opacity))),
+        ("paint mode", lambda: Gimp.context_set_paint_mode(Gimp.LayerMode.NORMAL)),
+    ]
+    for label, fn in calls:
+        try:
+            fn()
+        except Exception:
+            notes.append(label)
+    try:
+        br = None
+        for nm in ("Portrait Soft Round 人像柔圆", "2. Hardness 025"):
+            br = Gimp.Brush.get_by_name(nm)
+            if br is not None:
+                break
+        if br is not None:
+            Gimp.context_set_brush(br)
+        if hardness_soft:
+            Gimp.context_set_brush_hardness(0.25)
+        long_side = max(image.get_width(), image.get_height())
+        Gimp.context_set_brush_size(max(10.0, long_side / 40.0))
+    except Exception:
+        notes.append("brush")
+    return notes
+
+
+def _working_layer(image):
+    """The photo: top-level pixel layer that is not the locked backup."""
+    for l in image.get_layers():
+        try:
+            if not l.is_group() and l.get_name() != BACKUP_NAME and l.get_visible():
+                return l
+        except Exception:
+            continue
+    for l in image.get_layers():
+        if not l.is_group() and l.get_name() != BACKUP_NAME:
+            return l
+    return None
+
+
+def _insert_ranked(image, group, item, rank):
+    """Insert a new item into group so higher rank sits higher (children are top first)."""
+    pos = 0
+    for c in group.get_children():
+        r = _rank_of(c)
+        if r is not None and r > rank:
+            pos += 1
+    image.insert_layer(item, group, pos)
+
+
+def _in_image(image, item):
+    try:
+        return item.get_image() is not None and item.get_image().get_id() == image.get_id()
+    except Exception:
+        return False
+
+
+def _rank_of(item):
+    try:
+        n = item.get_name()
+    except Exception:
+        return None
+    for k, v in WS_NAMES.items():
+        if n == v:
+            return WS[k][1]
+    return None
+
+
+def _find_child(group, name):
+    for c in group.get_children():
+        if c.get_name() == name:
+            return c
+    return None
+
+
+def _new_group(image, name):
+    g = Gimp.GroupLayer.new(image, name) if hasattr(Gimp, "GroupLayer") else Gimp.Layer.group_new(image)
+    g.set_name(name)
+    return g
+
+
+def _black_mask(layer):
+    m = layer.create_mask(Gimp.AddMaskType.BLACK)
+    layer.add_mask(m)
+    return m
+
+
+def _select_mask(image, layer):
+    image.set_selected_layers([layer])
+    try:
+        if layer.get_mask() is not None:
+            layer.set_edit_mask(True)
+    except Exception:
+        pass
+
+
+def _run_noninteractive(name, image, layer, **props):
+    proc = Gimp.get_pdb().lookup_procedure(name)
+    if proc is None:
+        raise RuntimeError("没装：" + name)
+    cfg = proc.create_config()
+    cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
+    cfg.set_property("image", image)
+    if hasattr(cfg, "set_core_object_array"):
+        cfg.set_core_object_array("drawables", [layer])
+    else:
+        cfg.set_property("drawables", [layer])
+    for k, v in props.items():
+        cfg.set_property(k, v)
+    res = proc.run(cfg)
+    if res.index(0) != Gimp.PDBStatusType.SUCCESS:
+        err = ""
+        try:
+            err = res.index(1)
+        except Exception:
+            pass
+        raise RuntimeError("%s 没做成 %s" % (name, err or ""))
+
+
+def build_workspace(image, key):
+    """Build one skin workspace inside 插件改动. Returns a status line."""
+    if not any(l.get_name() == BACKUP_NAME for l in image.get_layers()):
+        start_retouch(image)
+    top = ensure_group(image)
+    title = WS_NAMES[key]
+    rank = WS[key][1]
+    old = _find_child(top, title)
+    photo = _working_layer(image)
+    if photo is None:
+        raise RuntimeError("找不到照片图层")
+    if old is not None:
+        # already built: just select it again and set the brush
+        target = old
+        if old.is_group():
+            kids = [c for c in old.get_children() if not c.is_group()]
+            target = kids[0] if kids else old
+        _select_mask(image, target)
+        notes = brush_setup(image, 100.0 if key == "ws:heal" else 20.0,
+                            "gimp-heal" if key == "ws:heal" else "gimp-paintbrush", key != "ws:heal")
+        return "「%s」已经有了，已重新选中。" % title + (" 没设上：" + "、".join(notes) if notes else "")
+
+    if key == "ws:fsep":
+        # fsep builds its group above the photo and hides the photo (composite unchanged)
+        _run_noninteractive("python-fu-fsep-oneclick", image, photo, radius=0.0)
+    if key == "ws:deshine":
+        _run_noninteractive("python-fu-de-shine", image, photo, mode="pro", strength=100.0)
+
+    image.undo_group_start()
+    try:
+        notes = []
+        if key == "ws:heal":
+            lay = Gimp.Layer.new(image, title, image.get_width(), image.get_height(),
+                                 Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
+            _insert_ranked(image, top, lay, rank)
+            image.set_selected_layers([lay])
+            notes = brush_setup(image, 100.0, "gimp-heal", False)
+            try:
+                Gimp.context_set_sample_merged(True)
+            except Exception:
+                notes.append("sample merged")
+            msg = "已建「去除瑕疵」空层，切到修复画笔（不透明度 100%）：Ctrl+点干净皮肤取样，再点斑。"
+        elif key == "ws:deshine":
+            g = _new_group(image, title)
+            _insert_ranked(image, top, g, rank)
+            brush = auto = None
+            for l in image.get_layers():
+                if l.get_name() == "去油光画笔":
+                    brush = l
+                elif l.get_name() == "去油光":
+                    auto = l
+            for l in (auto, brush):          # brush layer ends on top
+                if l is not None:
+                    image.reorder_item(l, g, 0)
+            if auto is not None:
+                auto.set_name("自动去油光（蒙版已清空；想要自动结果就把蒙版填白）")
+                m = auto.get_mask()
+                if m is not None:
+                    Gimp.context_set_background(_color("black"))
+                    m.fill(Gimp.FillType.BACKGROUND)
+            if brush is not None:
+                brush.set_name("去油光画笔（白色涂=去油光）")
+                _select_mask(image, brush)
+            notes = brush_setup(image, 20.0)
+            msg = "已建去油光层，蒙版全黑（画面没变）。用白色软画笔在油光上轻涂。"
+        elif key == "ws:fsep":
+            fs = None
+            for l in image.get_layers():
+                if l.is_group() and l.get_name() == "Frequency Separation":
+                    fs = l
+                    break
+            g = _new_group(image, title)
+            _insert_ranked(image, top, g, rank)
+            low = None
+            if fs is not None:
+                image.reorder_item(fs, g, 0)
+                for c in fs.get_children():
+                    if c.get_name().startswith("Low"):
+                        low = c
+            # fsep hid the photo; the High/Low pair now shows the same picture
+            if low is not None:
+                image.set_selected_layers([low])
+            notes = brush_setup(image, 20.0)
+            msg = "已建高低频，选中了低频层，白色/取色软画笔低不透明度修明暗。纹理用修复画笔在高频层上修。"
+        elif key == "ws:dnb":
+            g = _new_group(image, title)
+            _insert_ranked(image, top, g, rank)
+            down = photo.copy()
+            down.set_name(DNB_DOWN)
+            image.insert_layer(down, g, 0)
+            down.set_mode(Gimp.LayerMode.MULTIPLY)
+            down.set_opacity(60.0)
+            _black_mask(down)
+            up = photo.copy()
+            up.set_name(DNB_UP)
+            image.insert_layer(up, g, 0)
+            up.set_mode(Gimp.LayerMode.SCREEN)
+            up.set_opacity(60.0)
+            _black_mask(up)
+            _select_mask(image, up)
+            notes = brush_setup(image, 20.0)
+            msg = "已建「提亮」「压暗」两层，蒙版全黑（画面没变）。选中了提亮的蒙版：白色软画笔 20% 轻涂。"
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return msg + (" 没设上：" + "、".join(notes) if notes else "")
+
+
 # ---- layer helpers (used by later steps too) ----
 
 def find_group(image):
@@ -118,7 +373,7 @@ def ensure_group(image):
 
 
 def _photo_layer(image):
-    sel = [l for l in image.get_selected_layers() if not l.is_group()]
+    sel = [l for l in image.get_selected_layers() if not l.is_group() and l.get_name() != BACKUP_NAME]
     if sel:
         return sel[0]
     for l in reversed(image.get_layers()):
@@ -204,11 +459,26 @@ class Panel:
             grid.set_homogeneous(True)
             for label, name, tip in items:
                 b = Gtk.Button(label=label)
-                ok = name == "__start__" or (name is not None and pdb.procedure_exists(name))
+                if name in WS:
+                    need = {"ws:deshine": "python-fu-de-shine", "ws:fsep": "python-fu-fsep-oneclick"}.get(name)
+                    ok = need is None or pdb.procedure_exists(need)
+                else:
+                    ok = name == "__start__" or (name is not None and pdb.procedure_exists(name))
                 b.set_sensitive(ok)
-                b.set_tooltip_text(tip if ok else (tip if name is None else "没装：" + name))
+                b.set_tooltip_text(tip if ok else (tip if name is None else "没装：" + str(name)))
                 b.connect("clicked", self.on_button, name)
-                grid.add(b)
+                if name in WS:
+                    cell = Gtk.Box(spacing=2)
+                    cell.pack_start(b, True, True, 0)
+                    gear = Gtk.Button(label="⚙")
+                    gproc = WS[name][0]
+                    gear.set_sensitive(pdb.procedure_exists(gproc))
+                    gear.set_tooltip_text("打开参数对话框（也可 Shift+点按钮）：" + gproc)
+                    gear.connect("clicked", self.on_button, gproc)
+                    cell.pack_start(gear, False, False, 0)
+                    grid.add(cell)
+                else:
+                    grid.add(b)
             box.pack_start(grid, False, False, 0)
             outer.pack_start(box, False, False, 0)
 
@@ -267,6 +537,13 @@ class Panel:
             if name == "__start__":
                 self.status.set_text(start_retouch(image))
                 return
+            if name in WS:
+                ok, state = Gtk.get_current_event_state()
+                if ok and (state & Gdk.ModifierType.SHIFT_MASK):
+                    name = WS[name][0]
+                else:
+                    self.status.set_text(build_workspace(image, name))
+                    return
             proc = Gimp.get_pdb().lookup_procedure(name)
             cfg = proc.create_config()
             cfg.set_property("run-mode", Gimp.RunMode.INTERACTIVE)
@@ -274,7 +551,7 @@ class Panel:
             if "image" in props:
                 cfg.set_property("image", image)
             if "drawables" in props:
-                ds = [l for l in image.get_selected_layers()] or [_photo_layer(image)]
+                ds = [l for l in image.get_selected_layers() if not l.is_group()] or [_working_layer(image)]
                 if hasattr(cfg, "set_core_object_array"):
                     cfg.set_core_object_array("drawables", ds)
                 else:
@@ -322,4 +599,5 @@ class PortraitPanel(Gimp.PlugIn):
         return p
 
 
-Gimp.main(PortraitPanel.__gtype__, sys.argv)
+if __name__ == "__main__":
+    Gimp.main(PortraitPanel.__gtype__, sys.argv)

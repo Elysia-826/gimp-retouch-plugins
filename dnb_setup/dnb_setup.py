@@ -72,8 +72,7 @@ def setup(image, layer, blend, contrast, on_top):
     existing = find_existing(image)
     if existing is not None:
         image.set_selected_layers([existing])
-        Gimp.context_set_foreground(_color("white"))
-        Gimp.context_set_background(_color("black"))
+        _paint_defaults(image)
         Gimp.message("已存在 'Dodge & Burn' 组，已选中其 D&B 图层，未重复创建。\n"
                      "'Dodge & Burn' group already exists; selected its D&B layer instead of creating another.")
         Gimp.displays_flush()
@@ -120,9 +119,31 @@ def setup(image, layer, blend, contrast, on_top):
         Gimp.context_set_foreground(_color("#808080"))
         _ok(dnb.fill(Gimp.FillType.FOREGROUND), "fill")
 
-        Gimp.context_set_foreground(_color("white"))
-        Gimp.context_set_background(_color("black"))
         image.set_selected_layers([dnb])
+    finally:
+        image.undo_group_end()
+    _paint_defaults(image)
+    Gimp.displays_flush()
+
+
+def _paint_defaults(image):
+    """White on the grey layer at low opacity. Before this, FG could be left black
+    (the helper fill) at 100%, and the first stroke painted solid black."""
+    for fn in (lambda: Gimp.context_set_paint_method("gimp-paintbrush"),
+               lambda: Gimp.context_set_foreground(_color("white")),
+               lambda: Gimp.context_set_background(_color("black")),
+               lambda: Gimp.context_set_opacity(15.0),
+               lambda: Gimp.context_set_paint_mode(Gimp.LayerMode.NORMAL),
+               lambda: Gimp.context_set_brush_hardness(0.25)):
+        try:
+            fn()
+        except Exception:
+            pass
+
+
+def _unused():
+    try:
+        pass
     finally:
         image.undo_group_end()
     Gimp.displays_flush()

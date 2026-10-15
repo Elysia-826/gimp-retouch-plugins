@@ -10,7 +10,7 @@ pp = importlib.util.module_from_spec(spec); spec.loader.exec_module(pp)
 img = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path("/workspace/retouch-trial/before.jpg"))
 CHEEK = (1150, 2050, 200, 200)
 UNDER = (580, 1690, 220, 70)     # under left eye
-MOUTH = (780, 2080, 280, 110)
+MOUTH = (780, 2480, 400, 140)   # 修颜: real mouth ~y2480–2600; old (780,2080) was nose tip
 
 
 def px_rgb(rect):

@@ -37,22 +37,22 @@ GROUPS = [
         ("统一肤色", "ws:unify", "建「统一肤色」层（LCh 颜色轻拉），蒙版全黑，白色涂=统一。⚙ = 力度"),
     ]),
     ("face", "五官", [
-        ("按脸液化", "python-fu-mesh-liquify-face", "自动认脸，滑动调眼睛、下颌、鼻宽"),
-        ("液化", "python-fu-mesh-liquify", "推移、膨胀、收缩、旋转、还原"),
+        ("按脸液化", "python-fu-mesh-liquify-face", "打开按脸调整对话框：自动认脸，滑动调眼睛、下颌、鼻宽"),
+        ("液化", "python-fu-mesh-liquify", "打开柔和网格液化对话框：推移、膨胀、收缩、旋转、还原"),
         ("眼部修饰", "ws:eye", "先框选眼睛，再点：建「眼白提亮」「瞳孔提亮」两组，蒙版全黑，只在选区里涂。⚙ = 调两组力度"),
         ("牙齿美白", "ws:teeth", "先框选牙齿再点：建提亮+去黄，蒙版全黑，不会涂成死白。⚙ = 力度"),
         ("卧蚕压色", "ws:undereye", "建压暗+去色，蒙版全黑，白色涂卧蚕。⚙ = 力度"),
     ]),
     ("aux", "辅助", [
-        ("选出主体", "python-fu-subject-select", "把人或脸部皮肤做成选区"),
-        ("人像笔刷", "python-fu-portrait-brush", "一键设好修图常用笔刷"),
+        ("选择主体", "python-fu-subject-select", "打开「选出主体」对话框：把人或脸部皮肤做成选区（边缘略虚，不是发丝抠图）"),
+        ("人像笔刷", "python-fu-portrait-brush", "打开人像笔刷对话框：一键设好修图常用笔刷、大小和低不透明度"),
         ("看看涂到哪了", "__preview__", "把选中层的蒙版显示成半透明红色；再点一下关闭"),
         ("涂擦切换", "__swap__", "前景/背景色互换（同 X 键）：白=涂，黑=擦"),
         ("播放动作", "python-fu-action-play", "播放录好的动作"),
     ]),
     ("last", "最后", [
-        ("锐化输出", None, "还没做"),
-        ("批量导出", "python-fu-batch-export", "导出 JPEG/WebP/PNG"),
+        ("锐化", "ws:sharpen", "建锐化层（轻微 USM），蒙版全黑，白色涂=变锐。⚙ = 半径/力度"),
+        ("导出", "python-fu-batch-export", "打开批量导出对话框：JPEG/WebP/PNG，可缩放、锐化、水印"),
     ]),
 ]
 
@@ -110,6 +110,7 @@ WS = {
     "ws:unify": ("__unifycfg__", 7),
     "ws:undereye": ("__undereyecfg__", 8),
     "ws:teeth": ("__teethcfg__", 9),
+    "ws:sharpen": ("__sharpcfg__", 10),
 }
 WS_NAMES = {
     "ws:heal": "去除瑕疵（修复画笔：Ctrl+点取样，再点斑）",
@@ -121,6 +122,7 @@ WS_NAMES = {
     "ws:unify": "统一肤色",
     "ws:undereye": "卧蚕压色",
     "ws:teeth": "牙齿美白",
+    "ws:sharpen": "锐化（白色涂=变锐，黑色涂=擦掉）",
 }
 DNB_UP_COLOR = "#c8b0a0"
 DNB_UP_OPACITY = 80.0
@@ -483,6 +485,91 @@ def _apply_teeth(image, vals):
     Gimp.displays_flush()
 
 
+SHARP_DEFAULTS = {"radius": 0.8, "amount": 0.3, "opacity": 100.0}
+SHARP_FILTER = "gegl:unsharp-mask"
+SHARP_FILTER_LABEL = "锐化"
+
+
+def sharpen_settings():
+    try:
+        with open(_cfg_path(), encoding="utf-8") as f:
+            g = json.load(f)
+        return {k: float(g.get("sharp_" + k, v)) for k, v in SHARP_DEFAULTS.items()}
+    except Exception:
+        return dict(SHARP_DEFAULTS)
+
+
+def set_sharpen_settings(vals, image=None):
+    try:
+        with open(_cfg_path(), encoding="utf-8") as f:
+            g = json.load(f)
+    except Exception:
+        g = {}
+    for k, v in vals.items():
+        g["sharp_" + k] = float(v)
+    try:
+        with open(_cfg_path(), "w", encoding="utf-8") as f:
+            json.dump(g, f)
+    except Exception:
+        pass
+    if image is not None:
+        top = find_group(image)
+        lay = _find_child(top, WS_NAMES["ws:sharpen"]) if top is not None else None
+        if lay is not None and not lay.is_group():
+            try:
+                lay.set_opacity(float(vals.get("opacity", lay.get_opacity())))
+            except Exception:
+                pass
+            _apply_sharpen_filter(lay, vals)
+            Gimp.displays_flush()
+
+
+def _apply_sharpen_filter(lay, st):
+    """Attach or retune a non-destructive gegl:unsharp-mask on the layer."""
+    filt = None
+    try:
+        for f in lay.get_filters():
+            if f.get_operation_name() == SHARP_FILTER:
+                filt = f
+                break
+    except Exception:
+        filt = None
+    if filt is None:
+        filt = Gimp.DrawableFilter.new(lay, SHARP_FILTER, SHARP_FILTER_LABEL)
+        lay.append_filter(filt)
+    cfg = filt.get_config()
+    cfg.set_property("std-dev", float(st.get("radius", SHARP_DEFAULTS["radius"])))
+    cfg.set_property("scale", float(st.get("amount", SHARP_DEFAULTS["amount"])))
+    cfg.set_property("threshold", 0.0)
+    try:
+        filt.update()
+    except Exception:
+        pass
+    return filt
+
+
+def build_sharpen(image, top, rank):
+    """锐化: snapshot of current visible + non-destructive USM + black mask (paint white to sharpen).
+    Lives in 「最后」; captures whatever is below so earlier edits stay in the sharpen look."""
+    st = sharpen_settings()
+    image.undo_group_start()
+    try:
+        lay = Gimp.Layer.new_from_visible(image, image, WS_NAMES["ws:sharpen"])
+        _insert_ranked(image, top, lay, rank)
+        lay.set_mode(Gimp.LayerMode.NORMAL)
+        lay.set_opacity(float(st["opacity"]))
+        _apply_sharpen_filter(lay, st)
+        _black_mask(lay)
+        _select_mask(image, lay)
+        notes = brush_setup(image, 20.0)
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return ("已建「锐化」层（轻微 USM，默认半径 %.1f、力度 %.1f），蒙版全黑。白色软画笔 20%% 在眼睛、头发、衣服边缘轻涂；皮肤少涂以免毛孔夸张。⚙ 可调。"
+            % (st["radius"], st["amount"])
+            + (" 没设上：" + "、".join(notes) if notes else ""))
+
+
 def build_dered(image, top, rank):
     """皮肤减红: grey LCh Chroma (no HSV brightening). Black mask, paint white to reduce red."""
     st = dered_strength()
@@ -650,6 +737,7 @@ def build_workspace(image, key):
         "ws:unify": build_unify,
         "ws:undereye": build_undereye,
         "ws:teeth": build_teeth,
+        "ws:sharpen": build_sharpen,
     }
     if key in builders and old is None:
         return builders[key](image, top, rank)
@@ -1049,6 +1137,16 @@ class Panel:
                      ("chroma", "去黄", st["chroma"], 0, 80)],
                     lambda vals: set_teeth_strengths(vals, image))
                 return
+            if name == "__sharpcfg__":
+                st = sharpen_settings()
+                self.simple_strength_dialog(
+                    image, "锐化参数",
+                    "半径越大越影响大结构；力度越大越锐。默认半径 0.8、力度 0.3（和批量导出一样偏轻）。不透明度是整层上限。",
+                    [("radius", "半径", st["radius"], 0.1, 5.0, 0.05),
+                     ("amount", "力度", st["amount"], 0.0, 2.0, 0.05),
+                     ("opacity", "不透明度", st["opacity"], 0, 100, 1)],
+                    lambda vals: set_sharpen_settings(vals, image))
+                return
             if name == "__preview__":
                 self.status.set_text(toggle_preview(image))
                 return
@@ -1104,7 +1202,7 @@ class Panel:
 
 
     def simple_strength_dialog(self, image, title, help_text, scales_spec, on_ok):
-        """scales_spec: list of (key, label, value, lo, hi). on_ok(dict)."""
+        """scales_spec: list of (key, label, value, lo, hi[, step]). on_ok(dict)."""
         d = Gtk.Dialog(title=title, transient_for=self.win, modal=True)
         d.add_buttons("取消", Gtk.ResponseType.CANCEL, "确定", Gtk.ResponseType.OK)
         box = d.get_content_area()
@@ -1113,19 +1211,23 @@ class Panel:
         lab.set_line_wrap(True)
         box.pack_start(lab, False, False, 0)
         scales = {}
-        for key, text_, val, lo, hi in scales_spec:
+        for spec in scales_spec:
+            key, text_, val, lo, hi = spec[:5]
+            step = float(spec[5]) if len(spec) > 5 else 1.0
             row = Gtk.Box(spacing=6)
             row.pack_start(Gtk.Label(label=text_), False, False, 0)
-            sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, 1)
+            sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, step)
             sc.set_value(float(val))
             sc.set_hexpand(True)
+            if step < 1:
+                sc.set_digits(2)
             row.pack_start(sc, True, True, 0)
             box.pack_start(row, False, False, 0)
             scales[key] = sc
         d.show_all()
         if d.run() == Gtk.ResponseType.OK:
             on_ok({k: v.get_value() for k, v in scales.items()})
-            self.status.set_text(title.replace("力度", "") + "力度已保存。")
+            self.status.set_text(title.replace("力度", "").replace("参数", "") + "已保存。")
         d.destroy()
 
     def update_swap_label(self):

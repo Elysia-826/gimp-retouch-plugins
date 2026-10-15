@@ -33,14 +33,15 @@ GROUPS = [
         ("加深减淡", "ws:dnb", "建「提亮」「压暗」两层，蒙版全黑，白色涂=生效。⚙ = 旧的 50% 灰加深减淡搭建"),
         ("轻柔涂抹", "python-fu-dnb-flow", "在加深减淡层上按流量轻涂"),
         ("磨皮", None, "还没做"),
-        ("皮肤减红/统一肤色", None, "还没做"),
+        ("皮肤减红", "ws:dered", "建「皮肤减红」层（LCh 色度，不发亮），蒙版全黑，白色涂=减红。⚙ = 力度"),
+        ("统一肤色", "ws:unify", "建「统一肤色」层（LCh 颜色轻拉），蒙版全黑，白色涂=统一。⚙ = 力度"),
     ]),
     ("face", "五官", [
         ("按脸液化", "python-fu-mesh-liquify-face", "自动认脸，滑动调眼睛、下颌、鼻宽"),
         ("液化", "python-fu-mesh-liquify", "推移、膨胀、收缩、旋转、还原"),
         ("眼部修饰", "ws:eye", "先框选眼睛，再点：建「眼白提亮」「瞳孔提亮」两组，蒙版全黑，只在选区里涂。⚙ = 调两组力度"),
-        ("白牙", None, "还没做"),
-        ("卧蚕压色", None, "还没做"),
+        ("牙齿美白", "ws:teeth", "先框选牙齿再点：建提亮+去黄，蒙版全黑，不会涂成死白。⚙ = 力度"),
+        ("卧蚕压色", "ws:undereye", "建压暗+去色，蒙版全黑，白色涂卧蚕。⚙ = 力度"),
     ]),
     ("aux", "辅助", [
         ("选出主体", "python-fu-subject-select", "把人或脸部皮肤做成选区"),
@@ -105,6 +106,10 @@ WS = {
     "ws:fsep": ("python-fu-fsep-oneclick", 0),   # replaces the photo, so it sits at the bottom
     "ws:dnb": ("python-fu-dnb-setup", 4),
     "ws:eye": ("__eyecfg__", 5),
+    "ws:dered": ("__deredcfg__", 6),
+    "ws:unify": ("__unifycfg__", 7),
+    "ws:undereye": ("__undereyecfg__", 8),
+    "ws:teeth": ("__teethcfg__", 9),
 }
 WS_NAMES = {
     "ws:heal": "去除瑕疵（修复画笔：Ctrl+点取样，再点斑）",
@@ -112,6 +117,10 @@ WS_NAMES = {
     "ws:fsep": "高低频（低频：软笔刷修明暗颜色；高频：修复/仿制修纹理）",
     "ws:dnb": "加深减淡",
     "ws:eye": "眼部修饰",
+    "ws:dered": "皮肤减红",
+    "ws:unify": "统一肤色",
+    "ws:undereye": "卧蚕压色",
+    "ws:teeth": "牙齿美白",
 }
 DNB_UP_COLOR = "#c8b0a0"
 DNB_UP_OPACITY = 80.0
@@ -345,6 +354,230 @@ def build_eye(image, top, rank):
             + (" 没设上：" + "、".join(notes) if notes else ""))
 
 
+
+# ---- batch 2 item 7: 皮肤减红 / 统一肤色 / 卧蚕压色 / 牙齿美白 ----
+
+DERED_LAYER = "皮肤减红层"
+DERED_DEFAULT = 40.0
+UNIFY_LAYER = "统一肤色层"
+UNIFY_DEFAULT = 30.0
+UNIFY_COLOR = "#c4a090"          # mid warm skin; LCh Color pulls hue/chroma gently
+UNDER_DEFAULTS = {"dark": 55.0, "chroma": 35.0}
+UNDER_NAMES = {"dark": "卧蚕压暗层", "chroma": "卧蚕去色层"}
+TEETH_DEFAULTS = {"lift": 28.0, "chroma": 45.0}
+TEETH_NAMES = {"lift": "牙齿提亮层", "chroma": "牙齿去黄层"}
+
+
+def _json_cfg():
+    try:
+        with open(_cfg_path(), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_json_cfg(g):
+    try:
+        with open(_cfg_path(), "w", encoding="utf-8") as f:
+            json.dump(g, f)
+    except Exception:
+        pass
+
+
+def _cfg_float(key, default):
+    try:
+        return float(_json_cfg().get(key, default))
+    except Exception:
+        return float(default)
+
+
+def _set_cfg_floats(pairs, image=None, apply_fn=None):
+    g = _json_cfg()
+    for k, v in pairs.items():
+        g[k] = float(v)
+    _save_json_cfg(g)
+    if image is not None and apply_fn is not None:
+        apply_fn(image, {k: float(v) for k, v in pairs.items()})
+
+
+def dered_strength():
+    return _cfg_float("dered", DERED_DEFAULT)
+
+
+def set_dered_strength(val, image=None):
+    _set_cfg_floats({"dered": val}, image, _apply_dered)
+
+
+def _apply_dered(image, vals):
+    top = find_group(image)
+    g = _find_child(top, WS_NAMES["ws:dered"]) if top is not None else None
+    if g is None:
+        return
+    for c in (g.get_children() if g.is_group() else [g]):
+        if c.get_name() == DERED_LAYER:
+            c.set_opacity(float(vals["dered"]))
+    Gimp.displays_flush()
+
+
+def unify_strength():
+    return _cfg_float("unify", UNIFY_DEFAULT)
+
+
+def set_unify_strength(val, image=None):
+    _set_cfg_floats({"unify": val}, image, _apply_unify)
+
+
+def _apply_unify(image, vals):
+    top = find_group(image)
+    g = _find_child(top, WS_NAMES["ws:unify"]) if top is not None else None
+    if g is None:
+        return
+    for c in (g.get_children() if g.is_group() else [g]):
+        if c.get_name() == UNIFY_LAYER:
+            c.set_opacity(float(vals["unify"]))
+    Gimp.displays_flush()
+
+
+def under_strengths():
+    g = _json_cfg()
+    return {k: float(g.get("under_" + k, v)) for k, v in UNDER_DEFAULTS.items()}
+
+
+def set_under_strengths(vals, image=None):
+    _set_cfg_floats({"under_" + k: v for k, v in vals.items()}, image, _apply_under)
+
+
+def _apply_under(image, vals):
+    # vals keys are under_dark / under_chroma or dark / chroma
+    st = {k: float(vals.get("under_" + k, vals.get(k, UNDER_DEFAULTS[k]))) for k in UNDER_DEFAULTS}
+    top = find_group(image)
+    ug = _find_child(top, WS_NAMES["ws:undereye"]) if top is not None else None
+    if ug is None:
+        return
+    for c in ug.get_children():
+        for key, nm in UNDER_NAMES.items():
+            if c.get_name() == nm:
+                c.set_opacity(st[key])
+    Gimp.displays_flush()
+
+
+def teeth_strengths():
+    g = _json_cfg()
+    return {k: float(g.get("teeth_" + k, v)) for k, v in TEETH_DEFAULTS.items()}
+
+
+def set_teeth_strengths(vals, image=None):
+    _set_cfg_floats({"teeth_" + k: v for k, v in vals.items()}, image, _apply_teeth)
+
+
+def _apply_teeth(image, vals):
+    st = {k: float(vals.get("teeth_" + k, vals.get(k, TEETH_DEFAULTS[k]))) for k in TEETH_DEFAULTS}
+    top = find_group(image)
+    tg = _find_child(top, WS_NAMES["ws:teeth"]) if top is not None else None
+    if tg is None:
+        return
+    for c in tg.get_children():
+        for key, nm in TEETH_NAMES.items():
+            if c.get_name() == nm:
+                c.set_opacity(st[key])
+    Gimp.displays_flush()
+
+
+def build_dered(image, top, rank):
+    """皮肤减红: grey LCh Chroma (no HSV brightening). Black mask, paint white to reduce red."""
+    st = dered_strength()
+    image.undo_group_start()
+    try:
+        g = _new_group(image, WS_NAMES["ws:dered"])
+        _insert_ranked(image, top, g, rank)
+        lay = _solid_layer(image, DERED_LAYER, "#808080", Gimp.LayerMode.LCH_CHROMA, st)
+        image.insert_layer(lay, g, 0)
+        _black_mask(lay)
+        _select_mask(image, lay)
+        notes = brush_setup(image, 20.0)
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return ("已建「皮肤减红」：LCh 色度灰层，蒙版全黑，不发亮。白色软画笔 20% 在发红皮肤上轻涂。"
+            + (" 没设上：" + "、".join(notes) if notes else ""))
+
+
+def build_unify(image, top, rank):
+    """统一肤色: solid mid-skin in LCh Color — gentle hue/chroma pull, keeps L and texture."""
+    st = unify_strength()
+    image.undo_group_start()
+    try:
+        g = _new_group(image, WS_NAMES["ws:unify"])
+        _insert_ranked(image, top, g, rank)
+        lay = _solid_layer(image, UNIFY_LAYER, UNIFY_COLOR, Gimp.LayerMode.LCH_COLOR, st)
+        image.insert_layer(lay, g, 0)
+        _black_mask(lay)
+        _select_mask(image, lay)
+        notes = brush_setup(image, 20.0)
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return ("已建「统一肤色」：LCh 颜色轻拉（不磨皮、不塑胶感），蒙版全黑。白色软画笔 20% 在要统一的皮肤上轻涂。"
+            + (" 没设上：" + "、".join(notes) if notes else ""))
+
+
+def build_undereye(image, top, rank):
+    """卧蚕压色: black soft-light darken + grey LCh chroma. User paints; no selection required."""
+    st = under_strengths()
+    image.undo_group_start()
+    try:
+        g = _new_group(image, WS_NAMES["ws:undereye"])
+        _insert_ranked(image, top, g, rank)
+        chroma = _solid_layer(image, UNDER_NAMES["chroma"], "#808080",
+                              Gimp.LayerMode.LCH_CHROMA, st["chroma"])
+        image.insert_layer(chroma, g, 0)
+        dark = _solid_layer(image, UNDER_NAMES["dark"], "black",
+                            Gimp.LayerMode.SOFTLIGHT, st["dark"])
+        image.insert_layer(dark, g, 0)   # dark on top
+        # shared group mask so one paint hits both
+        m = g.create_mask(Gimp.AddMaskType.BLACK)
+        g.add_mask(m)
+        _select_mask(image, g)
+        notes = brush_setup(image, 20.0)
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return ("已建「卧蚕压色」：压暗 + 去色，蒙版全黑。白色软画笔 20% 涂卧蚕；想淡一点就少涂或调 ⚙。"
+            + (" 没设上：" + "、".join(notes) if notes else ""))
+
+
+def build_teeth(image, top, rank):
+    """牙齿美白: soft-light white (capped below pure white) + LCh chroma de-yellow. Needs selection."""
+    if Gimp.Selection.is_empty(image):
+        return "请先框选牙齿（用椭圆或套索圈住牙齿），再点「牙齿美白」。"
+    st = teeth_strengths()
+    _ok, _non, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
+    image.undo_group_start()
+    try:
+        g = _new_group(image, WS_NAMES["ws:teeth"])
+        _insert_ranked(image, top, g, rank)
+        chroma = _solid_layer(image, TEETH_NAMES["chroma"], "#808080",
+                              Gimp.LayerMode.LCH_CHROMA, st["chroma"])
+        image.insert_layer(chroma, g, 0)
+        lift = _solid_layer(image, TEETH_NAMES["lift"], "white",
+                            Gimp.LayerMode.SOFTLIGHT, st["lift"])
+        image.insert_layer(lift, g, 0)
+        m = g.create_mask(Gimp.AddMaskType.BLACK)
+        g.add_mask(m)
+        _select_mask(image, g)
+        notes = brush_setup(image, 20.0)
+        try:
+            Gimp.context_set_brush_size(max(3.0, min(x2 - x1, y2 - y1) / 3.0))
+        except Exception:
+            notes.append("brush size")
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return ("已建「牙齿美白」：提亮 + 去黄，蒙版全黑；柔光提亮不会涂成死白。选区保留着，只能涂在选区里。"
+            "白色软画笔 20% 轻涂牙齿。"
+            + (" 没设上：" + "、".join(notes) if notes else ""))
+
+
 def build_deshine(image, top, rank, title):
     """去油光 without photo pixels: run 去油光 on what is visible now, then turn the result
     into a darkening ratio (corrected / visible) on a Multiply layer. Multiply by a
@@ -411,13 +644,32 @@ def build_workspace(image, key):
     photo = _working_layer(image)
     if photo is None:
         raise RuntimeError("找不到照片图层")
-    if key == "ws:eye" and old is None:
-        return build_eye(image, top, rank)
+    builders = {
+        "ws:eye": build_eye,
+        "ws:dered": build_dered,
+        "ws:unify": build_unify,
+        "ws:undereye": build_undereye,
+        "ws:teeth": build_teeth,
+    }
+    if key in builders and old is None:
+        return builders[key](image, top, rank)
     if key == "ws:eye":
         wg = _find_child(old, EYE_WHITE)
         _select_mask(image, wg if wg is not None else old)
         brush_setup(image, 20.0)
         return "「眼部修饰」已经有了，已选中眼白的蒙版。"
+    if key == "ws:teeth":
+        _select_mask(image, old)
+        brush_setup(image, 20.0)
+        return "「牙齿美白」已经有了，已选中蒙版。"
+    if key in ("ws:dered", "ws:unify", "ws:undereye"):
+        target = old
+        if old.is_group() and key != "ws:undereye":
+            kids = [c for c in old.get_children() if not c.is_group()]
+            target = kids[0] if kids else old
+        _select_mask(image, target)
+        brush_setup(image, 20.0)
+        return "「%s」已经有了，已重新选中。" % title
     if old is not None:
         # already built: just select it again and set the brush
         target = old
@@ -755,8 +1007,47 @@ class Panel:
             if name == "__start__":
                 self.status.set_text(start_retouch(image))
                 return
+            if name in WS:
+                ok, state = Gtk.get_current_event_state()
+                if ok and (state & Gdk.ModifierType.SHIFT_MASK):
+                    name = WS[name][0]
+                else:
+                    self.status.set_text(build_workspace(image, name))
+                    return
             if name == "__eyecfg__":
                 self.eye_dialog(image)
+                return
+            if name == "__deredcfg__":
+                self.simple_strength_dialog(
+                    image, "皮肤减红力度",
+                    "数值越大，涂满时减红越强。默认 40。",
+                    [("dered", "减红", dered_strength(), 0, 80)],
+                    lambda vals: set_dered_strength(vals["dered"], image))
+                return
+            if name == "__unifycfg__":
+                self.simple_strength_dialog(
+                    image, "统一肤色力度",
+                    "数值越大，涂满时拉色越明显。默认 30，建议别太大以免假。",
+                    [("unify", "统一", unify_strength(), 0, 70)],
+                    lambda vals: set_unify_strength(vals["unify"], image))
+                return
+            if name == "__undereyecfg__":
+                st = under_strengths()
+                self.simple_strength_dialog(
+                    image, "卧蚕压色力度",
+                    "压暗 + 去色。默认压暗 55、去色 35。",
+                    [("dark", "压暗", st["dark"], 0, 90),
+                     ("chroma", "去色", st["chroma"], 0, 80)],
+                    lambda vals: set_under_strengths(vals, image))
+                return
+            if name == "__teethcfg__":
+                st = teeth_strengths()
+                self.simple_strength_dialog(
+                    image, "牙齿美白力度",
+                    "提亮用柔光，不会涂成死白。默认提亮 28、去黄 45。",
+                    [("lift", "提亮", st["lift"], 0, 60),
+                     ("chroma", "去黄", st["chroma"], 0, 80)],
+                    lambda vals: set_teeth_strengths(vals, image))
                 return
             if name == "__preview__":
                 self.status.set_text(toggle_preview(image))
@@ -766,16 +1057,6 @@ class Panel:
                 self.update_swap_label()
                 Gimp.displays_flush()
                 return
-            if name in WS:
-                ok, state = Gtk.get_current_event_state()
-                if ok and (state & Gdk.ModifierType.SHIFT_MASK):
-                    name = WS[name][0]
-                    if name == "__eyecfg__":
-                        self.eye_dialog(image)
-                        return
-                else:
-                    self.status.set_text(build_workspace(image, name))
-                    return
             proc = Gimp.get_pdb().lookup_procedure(name)
             cfg = proc.create_config()
             cfg.set_property("run-mode", Gimp.RunMode.INTERACTIVE)
@@ -819,6 +1100,32 @@ class Panel:
         if d.run() == Gtk.ResponseType.OK:
             set_eye_strengths({k: v.get_value() for k, v in scales.items()}, image)
             self.status.set_text("眼部修饰力度已保存。")
+        d.destroy()
+
+
+    def simple_strength_dialog(self, image, title, help_text, scales_spec, on_ok):
+        """scales_spec: list of (key, label, value, lo, hi). on_ok(dict)."""
+        d = Gtk.Dialog(title=title, transient_for=self.win, modal=True)
+        d.add_buttons("取消", Gtk.ResponseType.CANCEL, "确定", Gtk.ResponseType.OK)
+        box = d.get_content_area()
+        box.set_spacing(6)
+        lab = Gtk.Label(label=help_text)
+        lab.set_line_wrap(True)
+        box.pack_start(lab, False, False, 0)
+        scales = {}
+        for key, text_, val, lo, hi in scales_spec:
+            row = Gtk.Box(spacing=6)
+            row.pack_start(Gtk.Label(label=text_), False, False, 0)
+            sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, 1)
+            sc.set_value(float(val))
+            sc.set_hexpand(True)
+            row.pack_start(sc, True, True, 0)
+            box.pack_start(row, False, False, 0)
+            scales[key] = sc
+        d.show_all()
+        if d.run() == Gtk.ResponseType.OK:
+            on_ok({k: v.get_value() for k, v in scales.items()})
+            self.status.set_text(title.replace("力度", "") + "力度已保存。")
         d.destroy()
 
     def update_swap_label(self):

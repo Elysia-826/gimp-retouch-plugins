@@ -45,6 +45,9 @@ for sub in (pp.EYE_WHITE, pp.EYE_IRIS):
     dark = [i for i in range(n) if lum(base, i * 3) < 40]             # pupil
     sat0 = sum(max(base[i*3:i*3+3]) - min(base[i*3:i*3+3]) for i in bright) / max(1, len(bright))
     sat1 = sum(max(full_b[i*3:i*3+3]) - min(full_b[i*3:i*3+3]) for i in bright) / max(1, len(bright))
+    hs = lambda b, i: (max(b[i:i+3]) - min(b[i:i+3])) / max(1, max(b[i:i+3]))
+    s0 = sum(hs(base, i*3) for i in bright) / max(1, len(bright)); s1 = sum(hs(full_b, i*3) for i in bright) / max(1, len(bright))
+    print("EYE %s bright-px mean lift %.1f, HSV sat %.3f->%.3f (%+.0f%%)" % (sub[:4], sum(ds[i] for i in bright) / max(1, len(bright)), s0, s1, (s1/s0-1)*100 if s0 else 0), flush=True)
     print("EYE %s mask full: max lift %.1f, mean lift %.1f, max channel after %d (before %d), pupil(<40) mean lift %.1f, bright-px chroma %.1f->%.1f" % (
         sub[:4], max(ds), sum(ds) / n, max(full_b), max(base), sum(ds[i] for i in dark) / max(1, len(dark)), sat0, sat1), flush=True)
     Gimp.context_push(); Gimp.context_set_opacity(100.0); Gimp.context_set_foreground(Gegl.Color.new("black"))

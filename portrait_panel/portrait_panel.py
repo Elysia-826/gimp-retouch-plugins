@@ -264,7 +264,10 @@ def _run_noninteractive(name, image, layer, **props):
 
 EYE_WHITE = "眼白提亮（白色涂=变亮，黑色涂=擦掉）"
 EYE_IRIS = "瞳孔提亮（白色涂=变亮，黑色涂=擦掉）"
-EYE_DEFAULTS = {"white": 40.0, "iris": 30.0}   # opacity % of the white soft-light layer
+EYE_DEFAULTS = {"white": 28.0, "iris": 30.0}
+EYE_LIFT_NAMES = {"white": "眼白提亮层", "iris": "瞳孔提亮层"}
+EYE_DERED = "眼白去红血丝层"
+EYE_DERED_OPACITY = 40.0   # opacity % of the white soft-light layer
 
 
 def eye_strengths():
@@ -297,14 +300,15 @@ def set_eye_strengths(vals, image=None):
                 sg = _find_child(eg, sub)
                 if sg is not None:
                     for c in sg.get_children():
-                        if c.get_name().startswith("提亮"):
+                        n = c.get_name()
+                        if n == EYE_LIFT_NAMES[key] or n.startswith("提亮"):
                             c.set_opacity(float(vals[key]))
             Gimp.displays_flush()
 
 
 def build_eye(image, top, rank):
     """眼部修饰: needs a selection around the eye(s). Mode-based layers only (no photo
-    pixels): white soft light lifts, a grey HSL-saturation layer takes the red out of
+    pixels): white soft light lifts, a grey LCh-chroma layer takes the red out of
     the whites. Soft light keeps a non-white pixel below 255 and the black pupil black."""
     if Gimp.Selection.is_empty(image):
         return "请先框选眼睛（用椭圆或套索选区圈住眼睛），再点「眼部修饰」。"
@@ -318,11 +322,11 @@ def build_eye(image, top, rank):
         for sub in (EYE_IRIS, EYE_WHITE):          # 眼白 ends on top
             sg = _new_group(image, sub)
             image.insert_layer(sg, eg, 0)
-            lift = _solid_layer(image, "提亮", "white", Gimp.LayerMode.SOFTLIGHT,
-                                st["white"] if sub == EYE_WHITE else st["iris"])
+            key = "white" if sub == EYE_WHITE else "iris"
+            lift = _solid_layer(image, EYE_LIFT_NAMES[key], "white", Gimp.LayerMode.SOFTLIGHT, st[key])
             image.insert_layer(lift, sg, 0)
             if sub == EYE_WHITE:
-                grey = _solid_layer(image, "去红血丝（去饱和）", "#808080", Gimp.LayerMode.HSV_SATURATION, 60.0)
+                grey = _solid_layer(image, EYE_DERED, "#808080", Gimp.LayerMode.LCH_CHROMA, EYE_DERED_OPACITY)
                 image.insert_layer(grey, sg, 1)
             m = sg.create_mask(Gimp.AddMaskType.BLACK)
             sg.add_mask(m)
@@ -798,7 +802,7 @@ class Panel:
         d.add_buttons("取消", Gtk.ResponseType.CANCEL, "确定", Gtk.ResponseType.OK)
         box = d.get_content_area()
         box.set_spacing(6)
-        lab = Gtk.Label(label="数值越大，涂满时越亮。眼白默认 40，瞳孔默认 30；改了会同时用到已建好的图层。")
+        lab = Gtk.Label(label="数值越大，涂满时越亮。眼白默认 28，瞳孔默认 30；改了会同时用到已建好的图层。")
         lab.set_line_wrap(True)
         box.pack_start(lab, False, False, 0)
         scales = {}

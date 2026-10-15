@@ -81,7 +81,7 @@ $C = [ordered]@{
                            @{ file="opencv_python_headless-5.0.0.93-cp37-abi3-win_amd64.whl"; sha="829717b6a95554f273e49e357cee3b3a2a26b6f4842fbc1bed2b45bdd8f87e0e"; pypi="opencv-python-headless" }) }
 }
 $Requires = @{ "subject_mask"=@("mesh_liquify","helper-python"); "de_shine"=@("mesh_liquify","helper-python"); "portrait_panel"=@("fsep_oneclick","dnb_setup","de_shine","dnb_flow","mesh_liquify","subject_mask","portrait_brush","batch_export","action_record"); "spot_heal"=@("resynthesizer") }
-$Recommends = @{ "mesh_liquify"="helper-python (face mode)"; "portrait_panel"="spot_heal (⚙ of 去除瑕疵; needs resynthesizer)" }
+$Recommends = @{ "mesh_liquify"="helper-python (face mode)"; "portrait_panel"="spot_heal (gear button of the blemish tool; needs resynthesizer)" }
 $Sets = @{ "ours"=@("fsep_oneclick","dnb_setup","batch_export","mesh_liquify","spot_heal","dnb_flow","subject_mask","de_shine","portrait_panel","action_record","portrait_brush"); "third-party"=@("gmic","resynthesizer","batcher","adjustment-layer") }
 $Sets["all"] = $Sets["ours"] + $Sets["third-party"]
 

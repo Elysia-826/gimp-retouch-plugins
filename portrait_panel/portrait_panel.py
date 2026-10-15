@@ -21,7 +21,7 @@ PROC = "python-fu-portrait-panel"
 GROUP_NAME = "插件改动"
 BACKUP_NAME = "原图（锁定）"
 CFG_FILE = "portrait-panel.json"
-HELP = "从上往下按顺序点。先点「开始修这张」备份原图；灰色按钮是还没装或还没做的功能。"
+HELP = "从上往下按顺序点。按钮旁的 ? 看用法和前后对比；锐化放最后涂。先点「开始修这张」备份原图；灰色按钮是还没装或还没做的功能。"
 
 # (group id, title, [(label, pdb name or None, tooltip)])
 GROUPS = [
@@ -966,6 +966,47 @@ def start_retouch(image):
     return "好了：原图已备份并锁住（最底下，隐藏），上面建了「插件改动」组。"
 
 
+# ---- batch 2 item 9: per-button usage help (tooltip + ? popup) ----
+HELP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "help")
+# label -> (2-3 plain lines: what / how to paint / when, thumbnail key or None)
+BUTTON_HELP = {
+    "开始修这张": ("备份一份原图并锁住，建「插件改动」组。\n不用涂，点一下就行。\n每张图第一步先点它。", None),
+    "去除瑕疵": ("建空的修复层，切到修复画笔。\n按住 Ctrl 点干净皮肤取样，再点痘痘、斑点。\n先去瑕疵，再做别的。", None),
+    "去油光": ("压暗反光的油亮处，不带原图像素。\n蒙版全黑，白色软画笔 20% 在额头、鼻头、下巴的亮斑上轻涂。\n脸上反光明显时用。", "deshine"),
+    "高低频": ("把照片拆成颜色明暗（低频）和纹理（高频）两层。\n低频用软笔刷涂匀色块；高频用修复/仿制修纹理。\n要细修皮肤时用，会替换照片层。", None),
+    "加深减淡": ("建「提亮」「压暗」两层，蒙版全黑。\n白色软画笔低不透明度：亮的地方涂压暗，暗的地方涂提亮。\n修凹凸不平、塑造轮廓时用。", "dnb"),
+    "轻柔涂抹": ("在加深减淡层上按很低的流量慢慢涂。\n来回多涂几次叠加效果。\n做完「加深减淡」后用。", None),
+    "磨皮": ("还没做。", None),
+    "皮肤减红": ("降低皮肤的红色，不会发亮。\n蒙版全黑，白色软画笔 20% 在发红的脸颊、鼻翼轻涂。\n泛红、痘印红时用。", "dered"),
+    "统一肤色": ("把皮肤颜色轻轻往统一的肤色靠，保留纹理。\n蒙版全黑，白色软画笔 20% 在色块不匀的地方轻涂。\n脸上颜色深一块浅一块时用。", "unify"),
+    "按脸液化": ("自动找到脸，用滑块调眼睛大小、下颌、鼻宽。\n不用涂，拖滑块看预览。\n想整体微调脸型时用。", None),
+    "液化": ("网格液化：推、膨胀、收缩、旋转、还原。\n在对话框里用笔刷拖动。\n局部修形（发际、轮廓）时用，幅度要小。", None),
+    "眼部修饰": ("提亮眼白、去红血丝，单独提亮瞳孔。\n先框选眼睛再点；白色软画笔涂眼白，瞳孔在「瞳孔提亮」组蒙版上涂。\n眼睛发灰、发红时用。", "eye"),
+    "牙齿美白": ("提亮牙齿并去黄，不会变成死白。\n先框选牙齿再点，白色软画笔 20% 只涂牙齿。\n牙齿偏黄偏暗时用。", "teeth"),
+    "卧蚕压色": ("把眼下发暗发青的地方压暗并去色。\n蒙版全黑，白色软画笔 20% 沿卧蚕轻涂。\n卧蚕/眼下颜色太重时用。", "undereye"),
+    "选择主体": ("把整个人或脸部皮肤做成选区（边缘略虚）。\n不用涂，在对话框里选范围。\n只想改人或只改背景时用。", None),
+    "人像笔刷": ("一键设好修图常用的笔刷、大小和低不透明度。\n选好用途后直接在蒙版上涂。\n换不同修图步骤时用。", None),
+    "看看涂到哪了": ("把选中层的蒙版显示成半透明红色。\n再点一下关闭。\n想检查有没有漏涂、涂出界时用。", None),
+    "涂擦切换": ("前景、背景色互换（同 X 键）。\n白色=涂上效果，黑色=擦掉效果。\n涂多了想擦回来时用。", None),
+    "播放动作": ("播放之前录好的一串操作。\n不用涂。\n多张照片要重复同样步骤时用。", None),
+    "锐化": ("新建一层轻微锐化，蒙版全黑，白色涂哪里哪里变锐。\n轻涂眼睛、头发、衣服边缘，皮肤少涂。\n一定最后再涂：它是当时画面的快照，之后的改动不会被锐化。", "sharpen"),
+    "导出": ("批量导出 JPEG/WebP/PNG，可缩放、锐化、加水印。\n不用涂。\n全部修完最后一步用。", None),
+}
+
+
+def help_thumbs(label):
+    """-> (before path, after path) or None if no example exists."""
+    key = BUTTON_HELP.get(label, ("", None))[1]
+    if not key:
+        return None
+    b, a = (os.path.join(HELP_DIR, "%s_%s.jpg" % (key, w)) for w in ("before", "after"))
+    return (b, a) if os.path.exists(b) and os.path.exists(a) else None
+
+
+def help_text(label, fallback=""):
+    return BUTTON_HELP.get(label, (fallback, None))[0]
+
+
 class Panel:
     def __init__(self, image):
         self.image = image
@@ -1020,23 +1061,25 @@ class Panel:
                 else:
                     ok = name in ("__start__", "__preview__", "__swap__") or (name is not None and pdb.procedure_exists(name))
                 b.set_sensitive(ok)
-                b.set_tooltip_text(tip if ok else (tip if name is None else "没装：" + str(name)))
+                b.set_tooltip_text(help_text(label, tip) if ok or name is None else "没装：" + str(name))
                 b.connect("clicked", self.on_button, name)
                 if name == "__swap__":
                     self.swap_btn = b
                     self.update_swap_label()
+                cell = Gtk.Box(spacing=2)
+                cell.pack_start(b, True, True, 0)
+                q = Gtk.Button(label="?")
+                q.set_tooltip_text("「%s」怎么用（附前后对比）" % label)
+                q.connect("clicked", lambda _w, lab=label: self.help_dialog(lab))
+                cell.pack_start(q, False, False, 0)
                 if name in WS:
-                    cell = Gtk.Box(spacing=2)
-                    cell.pack_start(b, True, True, 0)
                     gear = Gtk.Button(label="⚙")
                     gproc = WS[name][0]
                     gear.set_sensitive(gproc.startswith("__") or pdb.procedure_exists(gproc))
                     gear.set_tooltip_text("打开参数对话框（也可 Shift+点按钮）：" + gproc)
                     gear.connect("clicked", self.on_button, gproc)
                     cell.pack_start(gear, False, False, 0)
-                    grid.add(cell)
-                else:
-                    grid.add(b)
+                grid.add(cell)
             box.pack_start(grid, False, False, 0)
             outer.pack_start(box, False, False, 0)
 
@@ -1174,6 +1217,29 @@ class Panel:
         except Exception as e:
             self.status.set_text("出错：%s" % e)
         Gimp.displays_flush()
+
+    def help_dialog(self, label):
+        d = Gtk.Dialog(title="怎么用：" + label, transient_for=self.win, modal=False)
+        d.add_button("知道了", Gtk.ResponseType.CLOSE)
+        box = d.get_content_area()
+        box.set_spacing(6)
+        lab = Gtk.Label(label=help_text(label, "暂无说明"))
+        lab.set_line_wrap(True); lab.set_xalign(0.0); lab.set_max_width_chars(36)
+        box.pack_start(lab, False, False, 4)
+        th = help_thumbs(label)
+        if th:
+            row = Gtk.Box(spacing=6)
+            for cap, path in (("之前", th[0]), ("之后", th[1])):
+                col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                col.pack_start(Gtk.Image.new_from_file(path), False, False, 0)
+                col.pack_start(Gtk.Label(label=cap), False, False, 0)
+                row.pack_start(col, False, False, 0)
+            box.pack_start(row, False, False, 0)
+            note = Gtk.Label(label="示例为蒙版涂满白色的效果；实际用 20% 软画笔轻涂会更自然。")
+            note.set_line_wrap(True); note.set_xalign(0.0); note.get_style_context().add_class("pp-help")
+            box.pack_start(note, False, False, 0)
+        d.connect("response", lambda w, _r: w.destroy())
+        d.show_all()
 
     def eye_dialog(self, image):
         st = eye_strengths()

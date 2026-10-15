@@ -43,7 +43,7 @@ $C = [ordered]@{
   "dnb_flow"        = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("dnb_flow\dnb_flow.py"); procs=@("python-fu-dnb-flow") }
   "subject_mask"    = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("subject_mask\subject_mask.py","subject_mask\subject_select.py"); procs=@("python-fu-subject-select") }
   "de_shine"        = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("de_shine\de_shine.py","de_shine\deshine_helper.py"); procs=@("python-fu-de-shine") }
-  "portrait_panel"  = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("portrait_panel\portrait_panel.py"); procs=@("python-fu-portrait-panel") }
+  "portrait_panel"  = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("portrait_panel\portrait_panel.py"); subdir="help"; subfiles=@("portrait_panel\help\dered_after.jpg","portrait_panel\help\dered_before.jpg","portrait_panel\help\deshine_after.jpg","portrait_panel\help\deshine_before.jpg","portrait_panel\help\dnb_after.jpg","portrait_panel\help\dnb_before.jpg","portrait_panel\help\eye_after.jpg","portrait_panel\help\eye_before.jpg","portrait_panel\help\sharpen_after.jpg","portrait_panel\help\sharpen_before.jpg","portrait_panel\help\teeth_after.jpg","portrait_panel\help\teeth_before.jpg","portrait_panel\help\undereye_after.jpg","portrait_panel\help\undereye_before.jpg","portrait_panel\help\unify_after.jpg","portrait_panel\help\unify_before.jpg"); procs=@("python-fu-portrait-panel") }
   "action_record"   = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("action_record\action_record.py","action_record\store.py","action_record\layers.py"); procs=@("python-fu-action-record-start","python-fu-action-record-stop","python-fu-action-play") }
   "portrait_brush"  = @{ kind="ours"; gimp="3.0,3.2"; ver="repo"; files=@("portrait_brush\portrait_brush.py"); procs=@("python-fu-portrait-brush")
                          brushdir="portrait-retouch"; brushes=@("portrait_brush\brushes\portrait-soft-round.vbr","portrait_brush\brushes\portrait-skin-pores.gbr","portrait_brush\brushes\portrait-hair-strand.gih") }
@@ -253,8 +253,11 @@ foreach ($v in $Vers) {
         foreach ($f in $d.files) { if ((Sha (Join-Path $Repo $f)) -ne (Sha (Join-Path $dst (Split-Path $f -Leaf)))) { $need = $true } }
         $bdst = if ($d.brushdir) { Join-Path $prof "brushes\$($d.brushdir)" } else { $null }   # brush files go to the profile's brushes folder
         if ($bdst) { foreach ($f in $d.brushes) { if ((Sha (Join-Path $Repo $f)) -ne (Sha (Join-Path $bdst (Split-Path $f -Leaf)))) { $need = $true } } }
+        $sdst = if ($d.subdir) { Join-Path $dst $d.subdir } else { $null }   # extra data next to the plug-in (portrait_panel\help)
+        if ($sdst) { foreach ($f in $d.subfiles) { if (-not (Test-Path (Join-Path $sdst (Split-Path $f -Leaf))) -or (Sha (Join-Path $Repo $f)) -ne (Sha (Join-Path $sdst (Split-Path $f -Leaf)))) { $need = $true } } }
         if ($need) { Do-It "install $id -> $dst" { New-Item -ItemType Directory -Force $dst | Out-Null; foreach ($f in $d.files) { Copy-Item -Force (Join-Path $Repo $f) $dst }
-                       if ($bdst) { New-Item -ItemType Directory -Force $bdst | Out-Null; foreach ($f in $d.brushes) { Copy-Item -Force (Join-Path $Repo $f) $bdst } } }; $act = "installed" }
+                       if ($bdst) { New-Item -ItemType Directory -Force $bdst | Out-Null; foreach ($f in $d.brushes) { Copy-Item -Force (Join-Path $Repo $f) $bdst } }
+                       if ($sdst) { New-Item -ItemType Directory -Force $sdst | Out-Null; foreach ($f in $d.subfiles) { Copy-Item -Force (Join-Path $Repo $f) $sdst } } }; $act = "installed" }
       } else {
         $cur = $state[$id]
         $need = $Reinstall -or -not $cur -or $cur[2] -ne $d.sha -or ($cur.Count -ge 4 -and ($cur[3].Split(";") | Where-Object { $_ -and -not (Test-Path (Join-Path $prof $_)) }))

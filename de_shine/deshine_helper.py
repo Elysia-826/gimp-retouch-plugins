@@ -190,7 +190,7 @@ def main(argv):
     # cap: oil sits on top of the lighting, it never needs a huge drop
     new[:, :, 0] = L - np.minimum(0.85 * excess, 14.0)
     for c in (1, 2):
-        new[:, :, c] = base[:, :, c] + 0.85 * (ref[:, :, c] - base[:, :, c])
+        new[:, :, c] = base[:, :, c] + 0.425 * (ref[:, :, c] - base[:, :, c])   # half pull: full pull turned skin reddish
     # texture: highlights flatten pores, so give back a touch of contrast there
     detail = lab - base
     # where correction applies at all: wide, soft, so painting never shows a seam

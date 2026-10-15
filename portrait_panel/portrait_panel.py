@@ -38,7 +38,7 @@ GROUPS = [
     ("face", "五官", [
         ("按脸液化", "python-fu-mesh-liquify-face", "自动认脸，滑动调眼睛、下颌、鼻宽"),
         ("液化", "python-fu-mesh-liquify", "推移、膨胀、收缩、旋转、还原"),
-        ("亮眼", None, "还没做"),
+        ("眼部修饰", "ws:eye", "先框选眼睛，再点：建「眼白提亮」「瞳孔提亮」两组，蒙版全黑，只在选区里涂。⚙ = 调两组力度"),
         ("白牙", None, "还没做"),
         ("卧蚕压色", None, "还没做"),
     ]),
@@ -104,13 +104,17 @@ WS = {
     "ws:deshine": ("python-fu-de-shine", 2),
     "ws:fsep": ("python-fu-fsep-oneclick", 0),   # replaces the photo, so it sits at the bottom
     "ws:dnb": ("python-fu-dnb-setup", 4),
+    "ws:eye": ("__eyecfg__", 5),
 }
 WS_NAMES = {
     "ws:heal": "去除瑕疵（修复画笔：Ctrl+点取样，再点斑）",
-    "ws:deshine": "去油光（白色涂=去油光，黑色涂=擦掉）",
+    "ws:deshine": "去油光（白色涂=去油光，黑色涂=擦掉）",   # now a single Multiply layer
     "ws:fsep": "高低频（低频：软笔刷修明暗颜色；高频：修复/仿制修纹理）",
     "ws:dnb": "加深减淡",
+    "ws:eye": "眼部修饰",
 }
+DNB_UP_COLOR = "#c8b0a0"
+DNB_UP_OPACITY = 80.0
 DNB_UP = "提亮（白色涂=变亮，黑色涂=擦掉）"
 DNB_DOWN = "压暗（白色涂=变暗，黑色涂=擦掉）"
 
@@ -258,8 +262,142 @@ def _run_noninteractive(name, image, layer, **props):
         raise RuntimeError("%s 没做成 %s" % (name, err or ""))
 
 
+EYE_WHITE = "眼白提亮（白色涂=变亮，黑色涂=擦掉）"
+EYE_IRIS = "瞳孔提亮（白色涂=变亮，黑色涂=擦掉）"
+EYE_DEFAULTS = {"white": 40.0, "iris": 30.0}   # opacity % of the white soft-light layer
+
+
+def eye_strengths():
+    try:
+        with open(_cfg_path(), encoding="utf-8") as f:
+            g = json.load(f)
+        return {k: float(g.get("eye_" + k, v)) for k, v in EYE_DEFAULTS.items()}
+    except Exception:
+        return dict(EYE_DEFAULTS)
+
+
+def set_eye_strengths(vals, image=None):
+    try:
+        with open(_cfg_path(), encoding="utf-8") as f:
+            g = json.load(f)
+    except Exception:
+        g = {}
+    for k, v in vals.items():
+        g["eye_" + k] = float(v)
+    try:
+        with open(_cfg_path(), "w", encoding="utf-8") as f:
+            json.dump(g, f)
+    except Exception:
+        pass
+    if image is not None:
+        top = find_group(image)
+        eg = _find_child(top, WS_NAMES["ws:eye"]) if top is not None else None
+        if eg is not None:
+            for sub, key in ((EYE_WHITE, "white"), (EYE_IRIS, "iris")):
+                sg = _find_child(eg, sub)
+                if sg is not None:
+                    for c in sg.get_children():
+                        if c.get_name().startswith("提亮"):
+                            c.set_opacity(float(vals[key]))
+            Gimp.displays_flush()
+
+
+def build_eye(image, top, rank):
+    """眼部修饰: needs a selection around the eye(s). Mode-based layers only (no photo
+    pixels): white soft light lifts, a grey HSL-saturation layer takes the red out of
+    the whites. Soft light keeps a non-white pixel below 255 and the black pupil black."""
+    if Gimp.Selection.is_empty(image):
+        return "请先框选眼睛（用椭圆或套索选区圈住眼睛），再点「眼部修饰」。"
+    st = eye_strengths()
+    _ok, _non, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
+    image.undo_group_start()
+    try:
+        eg = _new_group(image, WS_NAMES["ws:eye"])
+        _insert_ranked(image, top, eg, rank)
+        subs = {}
+        for sub in (EYE_IRIS, EYE_WHITE):          # 眼白 ends on top
+            sg = _new_group(image, sub)
+            image.insert_layer(sg, eg, 0)
+            lift = _solid_layer(image, "提亮", "white", Gimp.LayerMode.SOFTLIGHT,
+                                st["white"] if sub == EYE_WHITE else st["iris"])
+            image.insert_layer(lift, sg, 0)
+            if sub == EYE_WHITE:
+                grey = _solid_layer(image, "去红血丝（去饱和）", "#808080", Gimp.LayerMode.HSV_SATURATION, 60.0)
+                image.insert_layer(grey, sg, 1)
+            m = sg.create_mask(Gimp.AddMaskType.BLACK)
+            sg.add_mask(m)
+            subs[sub] = sg
+        _select_mask(image, subs[EYE_WHITE])
+        notes = brush_setup(image, 20.0)
+        try:
+            Gimp.context_set_brush_size(max(3.0, min(x2 - x1, y2 - y1) / 4.0))
+        except Exception:
+            notes.append("brush size")
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return ("已建「眼部修饰」：眼白提亮 / 瞳孔提亮，蒙版全黑。选区保留着，只能涂在选区里。"
+            "已选中眼白的蒙版：白色软画笔 20% 涂眼白；瞳孔请在图层面板点「瞳孔提亮」组的蒙版再涂。"
+            + (" 没设上：" + "、".join(notes) if notes else ""))
+
+
+def build_deshine(image, top, rank, title):
+    """去油光 without photo pixels: run 去油光 on what is visible now, then turn the result
+    into a darkening ratio (corrected / visible) on a Multiply layer. Multiply by a
+    ratio only scales whatever is below, so later 高低频 edits are never reverted."""
+    vis = Gimp.Layer.new_from_visible(image, image, "去油光临时合并")
+    image.insert_layer(vis, None, 0)
+    try:
+        _run_noninteractive("python-fu-de-shine", image, vis, mode="pro", strength=100.0)
+    except Exception:
+        image.remove_layer(vis)
+        raise
+    image.undo_group_start()
+    try:
+        made = {l.get_name(): l for l in image.get_layers() if l.get_name() in ("去油光", "去油光画笔")}
+        corr = made.get("去油光画笔")
+        if corr is None:
+            raise RuntimeError("去油光没有结果")
+        corr.remove_mask(Gimp.MaskApplyMode.DISCARD)
+        corr.set_visible(True)
+        # vis directly above corr, Divide: merge = corr / vis (both in GIMP's linear light)
+        image.reorder_item(vis, None, image.get_item_position(corr))
+        vis.set_mode(Gimp.LayerMode.DIVIDE)
+        vis.set_visible(True)
+        ratio = image.merge_down(vis, Gimp.MergeType.EXPAND_AS_NECESSARY)
+        for l in made.values():
+            if l is not corr and l.is_valid():
+                image.remove_layer(l)
+        # grey ratio = darkening only, same for R/G/B: no hue shift (colour pull turned skin red)
+        try:
+            ratio.desaturate(Gimp.DesaturateMode.LUMINANCE)
+        except Exception:
+            pass
+        ratio.set_name("去油光（白色涂=去油光，黑色涂=擦掉）")
+        ratio.set_mode(Gimp.LayerMode.MULTIPLY)
+        ratio.set_opacity(100.0)
+        _black_mask(ratio)
+        image.reorder_item(ratio, None, 0)   # out of the way, then into the group
+        g = top
+        # place as a plain layer inside 插件改动 at the 去油光 rank
+        pos = 0
+        for c in g.get_children():
+            r = _rank_of(c)
+            if r is not None and r > rank:
+                pos += 1
+        image.reorder_item(ratio, g, pos)
+        _select_mask(image, ratio)
+        notes = brush_setup(image, 20.0)
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return ("已建去油光层（只压暗，不带原图像素，之后改高低频也不会被盖掉），蒙版全黑。白色软画笔 20% 在油光上轻涂。"
+            + (" 没设上：" + "、".join(notes) if notes else ""))
+
+
 def build_workspace(image, key):
     """Build one skin workspace inside 插件改动. Returns a status line."""
+    remove_previews(image)   # never merged into 去油光, never left in the stack
     if not any(l.get_name() == BACKUP_NAME for l in image.get_layers()):
         start_retouch(image)
     top = ensure_group(image)
@@ -269,6 +407,13 @@ def build_workspace(image, key):
     photo = _working_layer(image)
     if photo is None:
         raise RuntimeError("找不到照片图层")
+    if key == "ws:eye" and old is None:
+        return build_eye(image, top, rank)
+    if key == "ws:eye":
+        wg = _find_child(old, EYE_WHITE)
+        _select_mask(image, wg if wg is not None else old)
+        brush_setup(image, 20.0)
+        return "「眼部修饰」已经有了，已选中眼白的蒙版。"
     if old is not None:
         # already built: just select it again and set the brush
         target = old
@@ -284,15 +429,7 @@ def build_workspace(image, key):
         # fsep builds its group above the photo and hides the photo (composite unchanged)
         _run_noninteractive("python-fu-fsep-oneclick", image, photo, radius=0.0)
     if key == "ws:deshine":
-        # work on what is visible now (after 高低频/去瑕疵 edits), not the original photo,
-        # so the correction layer does not bring back old pixels where it is painted
-        vis = Gimp.Layer.new_from_visible(image, image, "去油光临时合并")
-        image.insert_layer(vis, None, 0)
-        try:
-            _run_noninteractive("python-fu-de-shine", image, vis, mode="pro", strength=100.0)
-        finally:
-            image.remove_layer(vis)
-
+        return build_deshine(image, top, rank, title)
     image.undo_group_start()
     try:
         notes = []
@@ -358,12 +495,13 @@ def build_workspace(image, key):
             down = _solid_layer(image, DNB_DOWN, "black", Gimp.LayerMode.SOFTLIGHT, 70.0)
             image.insert_layer(down, g, 0)
             _black_mask(down)
-            up = _solid_layer(image, DNB_UP, "white", Gimp.LayerMode.SOFTLIGHT, 70.0)
+            # warm light grey, not white: lifts gently without greying the skin
+            up = _solid_layer(image, DNB_UP, DNB_UP_COLOR, Gimp.LayerMode.SOFTLIGHT, DNB_UP_OPACITY)
             image.insert_layer(up, g, 0)
             _black_mask(up)
             _select_mask(image, up)
             notes = brush_setup(image, 20.0)
-            msg = "已建「提亮」「压暗」两层（纯白/纯黑柔光，不带原图像素），蒙版全黑。选中了提亮的蒙版：白色软画笔 20% 轻涂。"
+            msg = "已建「提亮」「压暗」两层（柔光，不带原图像素），蒙版全黑。选中了提亮的蒙版：白色软画笔 20% 轻涂。"
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
@@ -548,7 +686,7 @@ class Panel:
                     cell.pack_start(b, True, True, 0)
                     gear = Gtk.Button(label="⚙")
                     gproc = WS[name][0]
-                    gear.set_sensitive(pdb.procedure_exists(gproc))
+                    gear.set_sensitive(gproc.startswith("__") or pdb.procedure_exists(gproc))
                     gear.set_tooltip_text("打开参数对话框（也可 Shift+点按钮）：" + gproc)
                     gear.connect("clicked", self.on_button, gproc)
                     cell.pack_start(gear, False, False, 0)
@@ -613,6 +751,9 @@ class Panel:
             if name == "__start__":
                 self.status.set_text(start_retouch(image))
                 return
+            if name == "__eyecfg__":
+                self.eye_dialog(image)
+                return
             if name == "__preview__":
                 self.status.set_text(toggle_preview(image))
                 return
@@ -625,6 +766,9 @@ class Panel:
                 ok, state = Gtk.get_current_event_state()
                 if ok and (state & Gdk.ModifierType.SHIFT_MASK):
                     name = WS[name][0]
+                    if name == "__eyecfg__":
+                        self.eye_dialog(image)
+                        return
                 else:
                     self.status.set_text(build_workspace(image, name))
                     return
@@ -647,6 +791,31 @@ class Panel:
         except Exception as e:
             self.status.set_text("出错：%s" % e)
         Gimp.displays_flush()
+
+    def eye_dialog(self, image):
+        st = eye_strengths()
+        d = Gtk.Dialog(title="眼部修饰力度", transient_for=self.win, modal=True)
+        d.add_buttons("取消", Gtk.ResponseType.CANCEL, "确定", Gtk.ResponseType.OK)
+        box = d.get_content_area()
+        box.set_spacing(6)
+        lab = Gtk.Label(label="数值越大，涂满时越亮。眼白默认 40，瞳孔默认 30；改了会同时用到已建好的图层。")
+        lab.set_line_wrap(True)
+        box.pack_start(lab, False, False, 0)
+        scales = {}
+        for key, text in (("white", "眼白提亮"), ("iris", "瞳孔提亮")):
+            row = Gtk.Box(spacing=6)
+            row.pack_start(Gtk.Label(label=text), False, False, 0)
+            sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 80, 1)
+            sc.set_value(st[key])
+            sc.set_hexpand(True)
+            row.pack_start(sc, True, True, 0)
+            box.pack_start(row, False, False, 0)
+            scales[key] = sc
+        d.show_all()
+        if d.run() == Gtk.ResponseType.OK:
+            set_eye_strengths({k: v.get_value() for k, v in scales.items()}, image)
+            self.status.set_text("眼部修饰力度已保存。")
+        d.destroy()
 
     def update_swap_label(self):
         try:

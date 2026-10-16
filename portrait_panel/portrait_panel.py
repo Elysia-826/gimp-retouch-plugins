@@ -53,7 +53,9 @@ GROUPS = [
         ("播放动作", "python-fu-action-play", "播放录好的动作"),
     ]),
     ("last", "最后", [
-        ("锐化", "ws:sharpen", "建锐化层（轻微 USM），蒙版全黑，白色涂=变锐。⚙ = 半径/力度"),
+        ("锐化", "ws:sharpen", "建锐化层（轻微 USM），蒙版全黑，白色涂=变锐。⚙ = 半径/力度/不透明度"),
+        ("一键锐化", "__sharp_oneclick__", "按 ⚙ 里的参数直接锐化选区（没选区就整张），蒙版=选区，之后还能涂改"),
+        ("更新锐化", "__sharp_refresh__", "锐化层按现在的画面重新生成，蒙版不变"),
         ("导出", "python-fu-batch-export", "打开批量导出对话框：JPEG/WebP/PNG，可缩放、锐化、水印"),
     ]),
 ]
@@ -550,17 +552,118 @@ def _apply_sharpen_filter(lay, st):
     return filt
 
 
+def has_drawable_filters():
+    """Feature-detect non-destructive filters (Gimp.DrawableFilter, GIMP 3.0+). Never assume by version alone."""
+    return hasattr(Gimp, "DrawableFilter") and hasattr(Gimp.Drawable, "append_filter")
+
+
+def gimp_version():
+    try:
+        return (int(Gimp.MAJOR_VERSION), int(Gimp.MINOR_VERSION), int(Gimp.MICRO_VERSION))
+    except Exception:
+        return (3, 0, 0)
+
+
+def find_sharpen(image):
+    top = find_group(image)
+    lay = _find_child(top, WS_NAMES["ws:sharpen"]) if top is not None else None
+    return None if lay is None or lay.is_group() else lay
+
+
+def _sharpen_snapshot(image, st):
+    """New layer = current visible image (without any existing sharpen layer) + USM."""
+    old = find_sharpen(image)
+    vis = old.get_visible() if old is not None else None
+    if old is not None:
+        old.set_visible(False)
+    try:
+        lay = Gimp.Layer.new_from_visible(image, image, WS_NAMES["ws:sharpen"])
+    finally:
+        if old is not None:
+            old.set_visible(vis)
+    if not has_drawable_filters():
+        raise RuntimeError("这个 GIMP 没有非破坏滤镜接口，锐化做不了。画面没有改动。")
+    lay.set_mode(Gimp.LayerMode.NORMAL)
+    lay.set_opacity(float(st["opacity"]))
+    _apply_sharpen_filter(lay, st)
+    return lay
+
+
+def _copy_mask(image, src_layer, dst_layer):
+    """Give dst_layer a mask identical to src_layer's (via the selection; the user's selection is restored)."""
+    saved = None if Gimp.Selection.is_empty(image) else Gimp.Selection.save(image)
+    try:
+        image.select_item(Gimp.ChannelOps.REPLACE, src_layer.get_mask())
+        dst_layer.add_mask(dst_layer.create_mask(Gimp.AddMaskType.SELECTION))
+    finally:
+        if saved is not None:
+            image.select_item(Gimp.ChannelOps.REPLACE, saved)
+            image.remove_channel(saved)
+        else:
+            Gimp.Selection.none(image)
+
+
+def sharpen_oneclick(image):
+    """一键锐化: sharpen the selection (whole image if none). Mask = selection, still paintable.
+    Replaces an existing sharpen layer (its pixels are re-made from the current image)."""
+    if not any(l.get_name() == BACKUP_NAME for l in image.get_layers()):
+        start_retouch(image)
+    st = sharpen_settings()
+    sel = not Gimp.Selection.is_empty(image)
+    image.undo_group_start()
+    try:
+        top = ensure_group(image)
+        old = find_sharpen(image)
+        lay = _sharpen_snapshot(image, st)
+        if old is not None:
+            pos = image.get_item_position(old)
+            image.remove_layer(old)
+            image.insert_layer(lay, top, pos)
+            lay.set_name(WS_NAMES["ws:sharpen"])
+        else:
+            _insert_ranked(image, top, lay, WS["ws:sharpen"][1])
+        lay.add_mask(lay.create_mask(Gimp.AddMaskType.SELECTION if sel else Gimp.AddMaskType.WHITE))
+        _select_mask(image, lay)
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return ("已锐化%s（半径 %.1f、力度 %.1f、不透明度 %d%%）。蒙版就是选区，白色涂=加、黑色涂=擦；改了前面的步骤再点“更新锐化”。"
+            % ("选区" if sel else "整张", st["radius"], st["amount"], round(st["opacity"])))
+
+
+def sharpen_refresh(image):
+    """更新锐化: re-make the sharpen pixels from the current visible image; keep mask, opacity, position."""
+    old = find_sharpen(image)
+    if old is None:
+        return "还没有锐化层。先点“锐化”或“一键锐化”。"
+    st = sharpen_settings()
+    st["opacity"] = old.get_opacity()
+    image.undo_group_start()
+    try:
+        lay = _sharpen_snapshot(image, st)
+        parent = old.get_parent()
+        pos = image.get_item_position(old)
+        image.insert_layer(lay, parent, pos)
+        if old.get_mask() is not None:
+            _copy_mask(image, old, lay)
+        lay.set_visible(old.get_visible())
+        image.remove_layer(old)
+        lay.set_name(WS_NAMES["ws:sharpen"])   # GIMP renamed the duplicate name while old existed
+        _select_mask(image, lay)
+    finally:
+        image.undo_group_end()
+    Gimp.displays_flush()
+    return "锐化层已按现在的画面重新生成，蒙版没变。"
+
+
 def build_sharpen(image, top, rank):
     """锐化: snapshot of current visible + non-destructive USM + black mask (paint white to sharpen).
     Lives in “最后”; captures whatever is below so earlier edits stay in the sharpen look."""
     st = sharpen_settings()
     image.undo_group_start()
     try:
-        lay = Gimp.Layer.new_from_visible(image, image, WS_NAMES["ws:sharpen"])
+        lay = _sharpen_snapshot(image, st)
         _insert_ranked(image, top, lay, rank)
-        lay.set_mode(Gimp.LayerMode.NORMAL)
-        lay.set_opacity(float(st["opacity"]))
-        _apply_sharpen_filter(lay, st)
         _black_mask(lay)
         _select_mask(image, lay)
         notes = brush_setup(image, 20.0)
@@ -1044,7 +1147,9 @@ BUTTON_HELP = {
     "看看涂到哪了": ("把选中层的蒙版显示成半透明红色。\n再点一下关闭。\n想检查有没有漏涂、涂出界时用。", None),
     "涂擦切换": ("前景、背景色互换（同 X 键）。\n白色=涂上效果，黑色=擦掉效果。\n涂多了想擦回来时用。", None),
     "播放动作": ("播放之前录好的一串操作。\n不用涂。\n多张照片要重复同样步骤时用。", None),
-    "锐化": ("新建一层轻微锐化（是点按钮那一刻画面的拷贝）。\n蒙版全黑，白色软画笔轻涂眼睛、头发、衣服边缘，皮肤少涂。\n一定所有步骤做完再点、再涂，否则之后的修改在涂过的地方会被盖掉。", "sharpen"),
+    "锐化": ("新建一层轻微锐化（是点按钮那一刻画面的拷贝）。\n蒙版全黑，白色软画笔轻涂眼睛、头发、衣服边缘，皮肤少涂。\n最好最后做；之后又改了前面的步骤，点“更新锐化”，涂过的地方不会变旧。", "sharpen"),
+    "一键锐化": ("按 ⚙ 里的半径、力度直接锐化选区；没选区就锐化整张。\n结果是新的一层，蒙版就是选区，白色涂=加、黑色涂=擦。\n眼睛、头发要快速锐化时用；前面改了再点“更新锐化”。", None),
+    "更新锐化": ("锐化层按现在的画面重新生成，蒙版、不透明度都不变。\n锐化之后又改了前面的步骤（比如去瑕疵、液化）时点一下。\n不用涂。", None),
     "导出": ("批量导出 JPEG/WebP/PNG，可缩放、锐化、加水印。\n点了会弹出对话框，不用涂。\n全部修完最后一步用。", None),
 }
 
@@ -1114,7 +1219,7 @@ class Panel:
                     need = {"ws:deshine": "python-fu-de-shine", "ws:fsep": "python-fu-fsep-oneclick"}.get(name)
                     ok = need is None or pdb.procedure_exists(need)
                 else:
-                    ok = name in ("__start__", "__preview__", "__swap__") or (name is not None and pdb.procedure_exists(name))
+                    ok = name in ("__start__", "__preview__", "__swap__", "__sharp_oneclick__", "__sharp_refresh__") or (name is not None and pdb.procedure_exists(name))
                 b.set_sensitive(ok)
                 b.set_tooltip_text(help_text(label, tip) if ok or name is None else "没装：" + str(name))
                 b.connect("clicked", self.on_button, name)
@@ -1244,6 +1349,12 @@ class Panel:
                      ("amount", "力度", st["amount"], 0.0, 2.0, 0.05),
                      ("opacity", "不透明度", st["opacity"], 0, 100, 1)],
                     lambda vals: set_sharpen_settings(vals, image))
+                return
+            if name == "__sharp_oneclick__":
+                self.status.set_text(sharpen_oneclick(image))
+                return
+            if name == "__sharp_refresh__":
+                self.status.set_text(sharpen_refresh(image))
                 return
             if name == "__preview__":
                 self.status.set_text(toggle_preview(image))

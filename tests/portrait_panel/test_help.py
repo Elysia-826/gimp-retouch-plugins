@@ -20,7 +20,7 @@ for lab in labels:
             pb = GdkPixbuf.Pixbuf.new_from_file(p)
             assert pb.get_width() == 240, (p, pb.get_width())
     print("HELP %s lines=%d thumbs=%s" % (lab, n, bool(th)), flush=True)
-assert "所有步骤做完" in pp.help_text("锐化")
+assert "更新锐化" in pp.help_text("锐化")
 assert pp.help_thumbs("牙齿美白") is None
 assert "会替换照片层" not in pp.help_text("高低频")
 for lab in ("液化", "按脸液化", "选择主体", "导出"):

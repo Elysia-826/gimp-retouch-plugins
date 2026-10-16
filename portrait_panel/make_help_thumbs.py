@@ -30,7 +30,7 @@ JOBS = {
 # ~30% soft-brush strokes (feathered elongated dabs, filled at 30% opacity, overlapping like 2-3 passes)
 STROKES = {
     "dered":    [(1290, 2000, 220, 70), (1320, 2080, 200, 70), (1300, 2160, 180, 60)],
-    "dnb":      [(1290, 2000, 220, 70), (1320, 2080, 200, 70), (1300, 2160, 180, 60)],
+    "dnb":      [(1300, 1990, 190, 210), (1340, 2040, 120, 130)],   # soft round blob (rows of strokes gave banding)
     "undereye": [(470, 1710, 290, 50), (500, 1725, 230, 40)],
 }
 
@@ -69,7 +69,7 @@ for key, (ws, sel, fill, crop) in JOBS.items():
             Gimp.context_set_opacity(STROKE_OPACITY[key])
             for r in STROKES[key]:
                 select(img, "ell", r)
-                Gimp.Selection.feather(img, 30.0)
+                Gimp.Selection.feather(img, 90.0 if key == "dnb" else 30.0)
                 m.edit_fill(Gimp.FillType.FOREGROUND)
         else:
             Gimp.context_set_opacity(100.0)

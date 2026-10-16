@@ -29,4 +29,22 @@ assert set(pp.BUTTON_HELP) == set(labels), set(pp.BUTTON_HELP) ^ set(labels)
 for lab, (txt, _k) in pp.BUTTON_HELP.items():
     assert "「" not in txt and "」" not in txt, lab
 assert "「" not in pp.HELP
+# single instance: live panel answers a ping, a stale lock is ignored and overwritten
+import tempfile, threading, time
+lk = os.path.join(tempfile.mkdtemp(), "pp.lock")
+assert not pp.ping_existing(lk)                       # no lock
+srv = pp.claim_instance(lk); hits = []; res = []
+th = threading.Thread(target=lambda: res.append(pp.ping_existing(lk))); th.start()
+for _ in range(50):
+    pp.poll_instance(srv, lambda: hits.append(1))
+    if hits: break
+    time.sleep(0.05)
+th.join(); assert res == [True] and hits == [1], (res, hits)
+pp.release_instance(srv, lk); assert not os.path.exists(lk)
+open(lk, "w").write("1 999999\n")                     # stale lock (dead port)
+assert not pp.ping_existing(lk)
+srv = pp.claim_instance(lk); assert int(open(lk).read().split()[0]) == srv.getsockname()[1]
+pp.release_instance(srv, lk)
+print("SINGLE INSTANCE OK", flush=True)
+assert "“提亮”和“压暗”" in pp.help_text("加深减淡")
 print("HELP ALL OK", len(labels), flush=True)

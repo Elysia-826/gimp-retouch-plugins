@@ -6,6 +6,8 @@
 # or not built yet are greyed out. The plug-in process keeps running until the
 # window is closed. Step 1: frame only (buttons + 开始修这张 + group helper).
 import json
+import socket
+import tempfile
 import os
 import sys
 
@@ -30,7 +32,7 @@ GROUPS = [
         ("去除瑕疵", "ws:heal", "建一个空的“去除瑕疵”层，切到修复画笔（Ctrl+点取样，再点斑）。⚙ = 点修复插件（填坐标自动补）"),
         ("去油光", "ws:deshine", "建去油光层，蒙版全黑（画面不变），白色涂=去油光。⚙ = 去油光参数"),
         ("高低频", "ws:fsep", "建高低频组，选中低频层并设好软画笔。⚙ = 频率分离参数"),
-        ("加深减淡", "ws:dnb", "建“提亮”“压暗”两层，蒙版全黑，白色涂=生效。⚙ = 旧的 50% 灰加深减淡搭建"),
+        ("加深减淡", "ws:dnb", "建“提亮”和“压暗”两层，蒙版全黑，白色涂=生效。⚙ = 旧的 50% 灰加深减淡搭建"),
         ("轻柔涂抹", "python-fu-dnb-flow", "在加深减淡层上按流量轻涂"),
         ("磨皮", None, "还没做"),
         ("皮肤减红", "ws:dered", "建“皮肤减红”层（LCh 色度，不发亮），蒙版全黑，白色涂=减红。⚙ = 力度"),
@@ -845,7 +847,7 @@ def build_workspace(image, key):
             _black_mask(up)
             _select_mask(image, up)
             notes = brush_setup(image, 20.0)
-            msg = "已建“提亮”“压暗”两层（柔光，不会把之前的修图盖掉），蒙版全黑。选中了提亮的蒙版：白色软画笔 20% 轻涂。"
+            msg = "已建“提亮”和“压暗”两层（柔光，不会把之前的修图盖掉），蒙版全黑。选中了提亮的蒙版：白色软画笔 20% 轻涂。"
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
@@ -966,6 +968,59 @@ def start_retouch(image):
     return "好了：原图已备份并锁住（最底下，隐藏），上面建了“插件改动”组。"
 
 
+# ---- single instance: TCP on 127.0.0.1 + lock file with the port (works on Windows too) ----
+LOCK_PATH = os.path.join(tempfile.gettempdir(), "gimp-portrait-panel-%s.lock" % (os.environ.get("USERNAME") or os.environ.get("USER") or "u"))
+
+
+def ping_existing(lock_path=None, msg=b"raise"):
+    """True if a live panel answered (and was told to come to the front). Stale/missing lock -> False."""
+    try:
+        with open(lock_path or LOCK_PATH, encoding="utf-8") as f:
+            port = int(f.read().split()[0])
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5) as c:
+            c.sendall(msg)
+            return c.recv(16) == b"ok"
+    except Exception:
+        return False
+
+
+def claim_instance(lock_path=None):
+    """Bind a listener and write the lock file (overwrites a stale one). -> non-blocking server socket."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0)); srv.listen(4); srv.setblocking(False)
+    with open(lock_path or LOCK_PATH, "w", encoding="utf-8") as f:
+        f.write("%d %d\n" % (srv.getsockname()[1], os.getpid()))
+    return srv
+
+
+def poll_instance(srv, on_raise):
+    """Accept pending pings; call on_raise() for each. Safe to call from a GLib timeout."""
+    while True:
+        try:
+            c, _ = srv.accept()
+        except (BlockingIOError, OSError):
+            return
+        try:
+            c.settimeout(0.5)
+            if c.recv(16).startswith(b"raise"):
+                c.sendall(b"ok"); on_raise()
+        except Exception:
+            pass
+        finally:
+            c.close()
+
+
+def release_instance(srv, lock_path=None):
+    try:
+        port = srv.getsockname()[1]; srv.close()
+        with open(lock_path or LOCK_PATH, encoding="utf-8") as f:
+            mine = int(f.read().split()[0]) == port
+        if mine:
+            os.remove(lock_path or LOCK_PATH)
+    except Exception:
+        pass
+
+
 # ---- batch 2 item 9: per-button usage help (tooltip + ? popup) ----
 HELP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "help")
 # label -> (2-3 plain lines: what / how to paint / when, thumbnail key or None)
@@ -974,7 +1029,7 @@ BUTTON_HELP = {
     "去除瑕疵": ("建空的修复层，切到修复画笔。\n按住 Ctrl 点干净皮肤取样，再点痘痘、斑点。\n先去瑕疵，再做别的。", None),
     "去油光": ("压暗反光的油亮处；只压暗，不会把之前的修图盖掉。\n蒙版全黑，白色软画笔 20% 在额头、鼻头、下巴的亮斑上轻涂。\n脸上反光明显时用。", "deshine"),
     "高低频": ("把照片拆成两层：低频管颜色和明暗，高频管毛孔纹理。\n低频用软笔刷涂匀色块；高频用修复/仿制修纹理。\n原图有备份，不会丢。要细修皮肤时用。", None),
-    "加深减淡": ("建“提亮”“压暗”两层，蒙版全黑。\n白色软画笔低不透明度：亮的地方涂压暗，暗的地方涂提亮。\n修凹凸不平、塑造轮廓时用。", "dnb"),
+    "加深减淡": ("建“提亮”和“压暗”两层，蒙版全黑。\n白色软画笔低不透明度：亮的地方涂压暗，暗的地方涂提亮。\n修凹凸不平、塑造轮廓时用。", "dnb"),
     "轻柔涂抹": ("在加深减淡层上按很低的流量慢慢涂。\n来回多涂几次叠加效果。\n做完“加深减淡”后用。", None),
     "磨皮": ("还没做。", None),
     "皮肤减红": ("降低皮肤的红色，不会发亮。\n蒙版全黑，白色软画笔在发红的脸颊、鼻翼轻涂。\n涂满会发灰，20% 轻涂即可。", "dered"),
@@ -1223,7 +1278,11 @@ class Panel:
 
     def _raise_panel(self):
         try:
-            self.win.present()
+            self.win.deiconify()
+            self.win.present_with_time(Gdk.CURRENT_TIME)
+            # some window managers ignore present() from a background plug-in; a brief keep-above forces it
+            self.win.set_keep_above(True)
+            GLib.timeout_add(200, lambda: (self.win.set_keep_above(False), False)[1])
         except Exception:
             pass
         return False
@@ -1251,7 +1310,7 @@ class Panel:
             note = Gtk.Label(label="示例只作参考；实际用 20%～30% 软画笔轻涂，效果以你涂的为准。")
             note.set_line_wrap(True); note.set_xalign(0.0); note.get_style_context().add_class("pp-help")
             box.pack_start(note, False, False, 0)
-        d.connect("response", lambda w, _r: w.destroy())
+        d.connect("response", lambda w, _r: (w.destroy(), GLib.idle_add(self._raise_panel)))
         d.show_all()
         d.resize(420, 1)   # shrink to content (text-only popups had ~100px blank)
 
@@ -1337,9 +1396,16 @@ def run(procedure, run_mode, image, drawables, config, data):
     if run_mode == Gimp.RunMode.NONINTERACTIVE:
         return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
                                            GLib.Error("人像面板只能交互使用 / interactive only"))
+    if ping_existing():          # a panel is already open: it brings itself to the front
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
     GimpUi.init(PROC)
-    Panel(image)
-    Gtk.main()
+    srv = claim_instance()
+    panel = Panel(image)
+    GLib.timeout_add(300, lambda: (poll_instance(srv, panel._raise_panel), True)[1])
+    try:
+        Gtk.main()
+    finally:
+        release_instance(srv)
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
 
 

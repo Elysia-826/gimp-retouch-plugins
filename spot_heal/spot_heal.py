@@ -204,7 +204,7 @@ def _heal_one(image, layer, cx, cy, radius, sampling):
     pdb = Gimp.get_pdb()
     proc = pdb.lookup_procedure("plug-in-heal-selection")
     if proc is None:
-        raise RuntimeError("没有安装 Resynthesizer 的「修复选区」。本插件靠它来补纹理。 / Resynthesizer heal-selection is not installed.")
+        raise RuntimeError("没有安装 Resynthesizer 的“修复选区”。本插件靠它来补纹理。 / Resynthesizer heal-selection is not installed.")
     cfg = proc.create_config()
     cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
     cfg.set_property("image", image)

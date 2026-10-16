@@ -661,7 +661,7 @@ def _trace_stroke(stroke, paint):
                 if x > x1: x1 = x
                 if y > y1: y1 = y
     if nink < 2:
-        raise RuntimeError("Paint a stroke on the layer first (transparent layer, GIMP brush) / 请先在透明的「液化笔触」图层上用画笔画一条线")
+        raise RuntimeError("Paint a stroke on the layer first (transparent layer, GIMP brush) / 请先在透明的“液化笔触”图层上用画笔画一条线")
     if nink > w * h * 0.35:
         raise RuntimeError("The stroke layer is mostly filled. Paint a line on a transparent layer / 这个图层几乎铺满了，请在透明图层上画一条线")
     bw, bh = x1 - x0 + 1, y1 - y0 + 1
@@ -1177,7 +1177,7 @@ def _detect_face(layer):
         raise RuntimeError("找不到认脸用的小模型。画面没有改动。 / Face model is missing. Nothing was changed.")
     py, env = _cv2_launcher()
     if py is None:
-        raise RuntimeError("自动认脸需要本机 Python 里的 OpenCV（cv2），现在没有。请改用「手动画框」。画面没有改动。 / OpenCV is not available. Use the manual box. Nothing was changed.")
+        raise RuntimeError("自动认脸需要本机 Python 里的 OpenCV（cv2），现在没有。请改用“手动画框”。画面没有改动。 / OpenCV is not available. Use the manual box. Nothing was changed.")
     fd, ppm = tempfile.mkstemp(prefix="mesh-liquify-face-", suffix=".ppm")
     os.close(fd)
     try:
@@ -1369,7 +1369,7 @@ def run(procedure, run_mode, image, drawables, config, data):
         path_i = config.get_choice_id("path")
         stroke = config.get_property("stroke-layer") if path_i == 1 else None
         if path_i == 1 and stroke is None:
-            raise RuntimeError("Pick the painted stroke layer / 请选择画好的「液化笔触」图层")
+            raise RuntimeError("Pick the painted stroke layer / 请选择画好的“液化笔触”图层")
         liquify(image, drawables[0], _mode(config),
                 config.get_property("x1"), config.get_property("y1"),
                 config.get_property("x2"), config.get_property("y2"),
@@ -1392,7 +1392,7 @@ def step_stroke(image, layer, redo):
     group = _walk_group(image.get_layers(), key) if key else None
     orig = _original_of(group)
     if orig is None or group is None:
-        raise RuntimeError("The hidden group 液化状态 is missing, so this stroke cannot be stepped back. Do not delete that group. / 没有隐藏的「液化状态」组，撤不回这一笔。别删那个组。")
+        raise RuntimeError("The hidden group 液化状态 is missing, so this stroke cannot be stepped back. Do not delete that group. / 没有隐藏的“液化状态”组，撤不回这一笔。别删那个组。")
     src_name = REDO if redo else HIST
     dst_name = HIST if redo else REDO
     stack = _load_stack(layer, src_name)
@@ -1511,7 +1511,7 @@ class MeshLiquify(Gimp.PlugIn):
         label = "重做上一笔液化 / Redo Last Liquify Stroke" if redo else "撤销上一笔液化 / Undo Last Liquify Stroke"
         blurb = ("Put back the stroke that was just undone. 把刚撤掉的那一笔液化再做上。"
                  if redo else
-                 "Step back one liquify stroke. The hidden group 液化状态 stays. 退回上一笔液化，不删除隐藏的「液化状态」组。")
+                 "Step back one liquify stroke. The hidden group 液化状态 stays. 退回上一笔液化，不删除隐藏的“液化状态”组。")
         p = Gimp.ImageProcedure.new(self, name, Gimp.PDBProcType.PLUGIN, fn, None)
         p.set_image_types("RGB*, GRAY*")
         p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)

@@ -102,7 +102,7 @@ def _run_step(image, layer, step):
         target = layers.find_layer(image, ref)
         if target is None or not isinstance(target, Gimp.Layer):
             raise RuntimeError(
-                "找不到记录的图层「%s」，这一步没有改到别的图层上。" % layers.layer_label(ref))
+                "找不到记录的图层“%s”，这一步没有改到别的图层上。" % layers.layer_label(ref))
         unhid = _select_target(image, target)
     else:
         # Built-in steps have no recorded layer: use whatever is current,
@@ -219,7 +219,7 @@ class ActionRecord(Gimp.PlugIn):
         else:
             p.set_menu_label("播放动作 / Play Action")
             p.set_documentation(
-                "按名字播放已保存的动作，或内置的「自然修图准备」。尚未人工验证。",
+                "按名字播放已保存的动作，或内置的“自然修图准备”。尚未人工验证。",
                 "自然修图准备 runs frequency separation at its own default (radius 0 = auto), then dodge-and-burn setup at its own defaults. Not verified by hand.",
                 name,
             )

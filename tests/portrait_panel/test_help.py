@@ -26,4 +26,7 @@ assert "会替换照片层" not in pp.help_text("高低频")
 for lab in ("液化", "按脸液化", "选择主体", "导出"):
     assert "会弹出对话框" in pp.help_text(lab), lab
 assert set(pp.BUTTON_HELP) == set(labels), set(pp.BUTTON_HELP) ^ set(labels)
+for lab, (txt, _k) in pp.BUTTON_HELP.items():
+    assert "「" not in txt and "」" not in txt, lab
+assert "「" not in pp.HELP
 print("HELP ALL OK", len(labels), flush=True)

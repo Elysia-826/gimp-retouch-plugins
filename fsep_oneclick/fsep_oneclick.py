@@ -137,7 +137,7 @@ def run(procedure, run_mode, image, drawables, config, data):
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
 
-HELP_TEXT = ("把照片拆成两层：「低频」管颜色和明暗，「高频」管毛孔纹理。\n"
+HELP_TEXT = ("把照片拆成两层：“低频”管颜色和明暗，“高频”管毛孔纹理。\n"
              "用法：选中照片图层，点确定；磨皮、修色涂低频，修瑕疵涂高频，两边互不影响。\n"
              "安全：原图被隐藏保留在下面，不会被改动；模糊半径填 0 会按图片大小自动算。")
 

@@ -216,7 +216,7 @@ def _run_helper(image, layer, sens, soft, only_face, flash=False):
         raise RuntimeError("需要本机 Python 里的 OpenCV（cv2）。画面没有改动。 / OpenCV is not available. Nothing was changed.")
     model = _model_path()
     if only_face and model is None:
-        raise RuntimeError("「只处理脸部」要用 mesh_liquify 里的认脸模型，现在找不到。画面没有改动。 / Face model from mesh_liquify is missing. Nothing was changed.")
+        raise RuntimeError("“只处理脸部”要用 mesh_liquify 里的认脸模型，现在找不到。画面没有改动。 / Face model from mesh_liquify is missing. Nothing was changed.")
     w, h = layer.get_width(), layer.get_height()
     sel = _selection_for(image, layer)
     paths = []
@@ -245,7 +245,7 @@ def _run_helper(image, layer, sens, soft, only_face, flash=False):
         if not info.get("ok"):
             code = info.get("error") or "fail"
             if code == "no-face":
-                raise RuntimeError("没有找到脸。可以关掉「只处理脸部」，或先画选区。画面没有改动。 / No face found. Turn off 'only face' or make a selection. Nothing was changed.")
+                raise RuntimeError("没有找到脸。可以关掉“只处理脸部”，或先画选区。画面没有改动。 / No face found. Turn off 'only face' or make a selection. Nothing was changed.")
             if code == "no-cv2":
                 raise RuntimeError("OpenCV 导入失败。画面没有改动。 / OpenCV import failed. Nothing was changed.")
             raise RuntimeError("去油光没有做成（%s）。画面没有改动。 / De-shine failed. Nothing was changed." % code)

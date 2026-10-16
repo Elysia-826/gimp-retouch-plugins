@@ -21,30 +21,30 @@ PROC = "python-fu-portrait-panel"
 GROUP_NAME = "插件改动"
 BACKUP_NAME = "原图（锁定）"
 CFG_FILE = "portrait-panel.json"
-HELP = "从上往下按顺序点。按钮旁的 ? 看用法和前后对比；锐化放最后涂。先点「开始修这张」备份原图；灰色按钮是还没装或还没做的功能。"
+HELP = "从上往下按顺序点。按钮旁的 ? 看用法和前后对比；锐化放最后涂。先点“开始修这张”备份原图；灰色按钮是还没装或还没做的功能。"
 
 # (group id, title, [(label, pdb name or None, tooltip)])
 GROUPS = [
-    ("start", "开始", [("开始修这张", "__start__", "复制一份原图并锁住，建「插件改动」图层组，之后的改动都放进组里")]),
+    ("start", "开始", [("开始修这张", "__start__", "复制一份原图并锁住，建“插件改动”图层组，之后的改动都放进组里")]),
     ("skin", "皮肤", [
-        ("去除瑕疵", "ws:heal", "建一个空的「去除瑕疵」层，切到修复画笔（Ctrl+点取样，再点斑）。⚙ = 点修复插件（填坐标自动补）"),
+        ("去除瑕疵", "ws:heal", "建一个空的“去除瑕疵”层，切到修复画笔（Ctrl+点取样，再点斑）。⚙ = 点修复插件（填坐标自动补）"),
         ("去油光", "ws:deshine", "建去油光层，蒙版全黑（画面不变），白色涂=去油光。⚙ = 去油光参数"),
         ("高低频", "ws:fsep", "建高低频组，选中低频层并设好软画笔。⚙ = 频率分离参数"),
-        ("加深减淡", "ws:dnb", "建「提亮」「压暗」两层，蒙版全黑，白色涂=生效。⚙ = 旧的 50% 灰加深减淡搭建"),
+        ("加深减淡", "ws:dnb", "建“提亮”“压暗”两层，蒙版全黑，白色涂=生效。⚙ = 旧的 50% 灰加深减淡搭建"),
         ("轻柔涂抹", "python-fu-dnb-flow", "在加深减淡层上按流量轻涂"),
         ("磨皮", None, "还没做"),
-        ("皮肤减红", "ws:dered", "建「皮肤减红」层（LCh 色度，不发亮），蒙版全黑，白色涂=减红。⚙ = 力度"),
-        ("统一肤色", "ws:unify", "建「统一肤色」层（LCh 颜色轻拉），蒙版全黑，白色涂=统一。⚙ = 力度"),
+        ("皮肤减红", "ws:dered", "建“皮肤减红”层（LCh 色度，不发亮），蒙版全黑，白色涂=减红。⚙ = 力度"),
+        ("统一肤色", "ws:unify", "建“统一肤色”层（LCh 颜色轻拉），蒙版全黑，白色涂=统一。⚙ = 力度"),
     ]),
     ("face", "五官", [
         ("按脸液化", "python-fu-mesh-liquify-face", "打开按脸调整对话框：自动认脸，滑动调眼睛、下颌、鼻宽"),
         ("液化", "python-fu-mesh-liquify", "打开柔和网格液化对话框：推移、膨胀、收缩、旋转、还原"),
-        ("眼部修饰", "ws:eye", "先框选眼睛，再点：建「眼白提亮」「瞳孔提亮」两组，蒙版全黑，只在选区里涂。⚙ = 调两组力度"),
+        ("眼部修饰", "ws:eye", "先框选眼睛，再点：建“眼白提亮”“瞳孔提亮”两组，蒙版全黑，只在选区里涂。⚙ = 调两组力度"),
         ("牙齿美白", "ws:teeth", "先框选牙齿再点：建提亮+去黄，蒙版全黑，不会涂成死白。⚙ = 力度"),
         ("卧蚕压色", "ws:undereye", "建压暗+去色，蒙版全黑，白色涂卧蚕。⚙ = 力度"),
     ]),
     ("aux", "辅助", [
-        ("选择主体", "python-fu-subject-select", "打开「选出主体」对话框：把人或脸部皮肤做成选区（边缘略虚，不是发丝抠图）"),
+        ("选择主体", "python-fu-subject-select", "打开“选出主体”对话框：把人或脸部皮肤做成选区（边缘略虚，不是发丝抠图）"),
         ("人像笔刷", "python-fu-portrait-brush", "打开人像笔刷对话框：一键设好修图常用笔刷、大小和低不透明度"),
         ("看看涂到哪了", "__preview__", "把选中层的蒙版显示成半透明红色；再点一下关闭"),
         ("涂擦切换", "__swap__", "前景/背景色互换（同 X 键）：白=涂，黑=擦"),
@@ -322,7 +322,7 @@ def build_eye(image, top, rank):
     pixels): white soft light lifts, a grey LCh-chroma layer takes the red out of
     the whites. Soft light keeps a non-white pixel below 255 and the black pupil black."""
     if Gimp.Selection.is_empty(image):
-        return "请先框选眼睛（用椭圆或套索选区圈住眼睛），再点「眼部修饰」。"
+        return "请先框选眼睛（用椭圆或套索选区圈住眼睛），再点“眼部修饰”。"
     st = eye_strengths()
     _ok, _non, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
     image.undo_group_start()
@@ -351,8 +351,8 @@ def build_eye(image, top, rank):
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
-    return ("已建「眼部修饰」：眼白提亮 / 瞳孔提亮，蒙版全黑。选区保留着，只能涂在选区里。"
-            "已选中眼白的蒙版：白色软画笔 20% 涂眼白；瞳孔请在图层面板点「瞳孔提亮」组的蒙版再涂。"
+    return ("已建“眼部修饰”：眼白提亮 / 瞳孔提亮，蒙版全黑。选区保留着，只能涂在选区里。"
+            "已选中眼白的蒙版：白色软画笔 20% 涂眼白；瞳孔请在图层面板点“瞳孔提亮”组的蒙版再涂。"
             + (" 没设上：" + "、".join(notes) if notes else ""))
 
 
@@ -550,7 +550,7 @@ def _apply_sharpen_filter(lay, st):
 
 def build_sharpen(image, top, rank):
     """锐化: snapshot of current visible + non-destructive USM + black mask (paint white to sharpen).
-    Lives in 「最后」; captures whatever is below so earlier edits stay in the sharpen look."""
+    Lives in “最后”; captures whatever is below so earlier edits stay in the sharpen look."""
     st = sharpen_settings()
     image.undo_group_start()
     try:
@@ -565,7 +565,7 @@ def build_sharpen(image, top, rank):
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
-    return ("已建「锐化」层（轻微 USM，默认半径 %.1f、力度 %.1f），蒙版全黑。白色软画笔 20%% 在眼睛、头发、衣服边缘轻涂；皮肤少涂以免毛孔夸张。⚙ 可调。"
+    return ("已建“锐化”层（轻微 USM，默认半径 %.1f、力度 %.1f），蒙版全黑。白色软画笔 20%% 在眼睛、头发、衣服边缘轻涂；皮肤少涂以免毛孔夸张。⚙ 可调。"
             % (st["radius"], st["amount"])
             + (" 没设上：" + "、".join(notes) if notes else ""))
 
@@ -585,7 +585,7 @@ def build_dered(image, top, rank):
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
-    return ("已建「皮肤减红」：LCh 色度灰层，蒙版全黑，不发亮。白色软画笔 20% 在发红皮肤上轻涂。"
+    return ("已建“皮肤减红”：LCh 色度灰层，蒙版全黑，不发亮。白色软画笔 20% 在发红皮肤上轻涂。"
             + (" 没设上：" + "、".join(notes) if notes else ""))
 
 
@@ -604,7 +604,7 @@ def build_unify(image, top, rank):
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
-    return ("已建「统一肤色」：LCh 颜色轻拉（不磨皮、不塑胶感），蒙版全黑。白色软画笔 20% 在要统一的皮肤上轻涂。"
+    return ("已建“统一肤色”：LCh 颜色轻拉（不磨皮、不塑胶感），蒙版全黑。白色软画笔 20% 在要统一的皮肤上轻涂。"
             + (" 没设上：" + "、".join(notes) if notes else ""))
 
 
@@ -629,14 +629,14 @@ def build_undereye(image, top, rank):
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
-    return ("已建「卧蚕压色」：压暗 + 去色，蒙版全黑。白色软画笔 20% 涂卧蚕；想淡一点就少涂或调 ⚙。"
+    return ("已建“卧蚕压色”：压暗 + 去色，蒙版全黑。白色软画笔 20% 涂卧蚕；想淡一点就少涂或调 ⚙。"
             + (" 没设上：" + "、".join(notes) if notes else ""))
 
 
 def build_teeth(image, top, rank):
     """牙齿美白: soft-light white (capped below pure white) + LCh chroma de-yellow. Needs selection."""
     if Gimp.Selection.is_empty(image):
-        return "请先框选牙齿（用椭圆或套索圈住牙齿），再点「牙齿美白」。"
+        return "请先框选牙齿（用椭圆或套索圈住牙齿），再点“牙齿美白”。"
     st = teeth_strengths()
     _ok, _non, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
     image.undo_group_start()
@@ -660,7 +660,7 @@ def build_teeth(image, top, rank):
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
-    return ("已建「牙齿美白」：提亮 + 去黄，蒙版全黑；柔光提亮不会涂成死白。选区保留着，只能涂在选区里。"
+    return ("已建“牙齿美白”：提亮 + 去黄，蒙版全黑；柔光提亮不会涂成死白。选区保留着，只能涂在选区里。"
             "白色软画笔 20% 轻涂牙齿。"
             + (" 没设上：" + "、".join(notes) if notes else ""))
 
@@ -745,11 +745,11 @@ def build_workspace(image, key):
         wg = _find_child(old, EYE_WHITE)
         _select_mask(image, wg if wg is not None else old)
         brush_setup(image, 20.0)
-        return "「眼部修饰」已经有了，已选中眼白的蒙版。"
+        return "“眼部修饰”已经有了，已选中眼白的蒙版。"
     if key == "ws:teeth":
         _select_mask(image, old)
         brush_setup(image, 20.0)
-        return "「牙齿美白」已经有了，已选中蒙版。"
+        return "“牙齿美白”已经有了，已选中蒙版。"
     if key in ("ws:dered", "ws:unify", "ws:undereye"):
         target = old
         if old.is_group() and key != "ws:undereye":
@@ -757,7 +757,7 @@ def build_workspace(image, key):
             target = kids[0] if kids else old
         _select_mask(image, target)
         brush_setup(image, 20.0)
-        return "「%s」已经有了，已重新选中。" % title
+        return "“%s”已经有了，已重新选中。" % title
     if old is not None:
         # already built: just select it again and set the brush
         target = old
@@ -767,7 +767,7 @@ def build_workspace(image, key):
         _select_mask(image, target)
         notes = brush_setup(image, 100.0 if key == "ws:heal" else 20.0,
                             "gimp-heal" if key == "ws:heal" else "gimp-paintbrush", key != "ws:heal")
-        return "「%s」已经有了，已重新选中。" % title + (" 没设上：" + "、".join(notes) if notes else "")
+        return "“%s”已经有了，已重新选中。" % title + (" 没设上：" + "、".join(notes) if notes else "")
 
     if key == "ws:fsep":
         # fsep builds its group above the photo and hides the photo (composite unchanged)
@@ -787,7 +787,7 @@ def build_workspace(image, key):
                 Gimp.context_set_sample_merged(True)
             except Exception:
                 notes.append("sample merged")
-            msg = "已建「去除瑕疵」空层，切到修复画笔（不透明度 100%）：Ctrl+点干净皮肤取样，再点斑。"
+            msg = "已建“去除瑕疵”空层，切到修复画笔（不透明度 100%）：Ctrl+点干净皮肤取样，再点斑。"
         elif key == "ws:deshine":
             g = _new_group(image, title)
             _insert_ranked(image, top, g, rank)
@@ -845,7 +845,7 @@ def build_workspace(image, key):
             _black_mask(up)
             _select_mask(image, up)
             notes = brush_setup(image, 20.0)
-            msg = "已建「提亮」「压暗」两层（柔光，不会把之前的修图盖掉），蒙版全黑。选中了提亮的蒙版：白色软画笔 20% 轻涂。"
+            msg = "已建“提亮”“压暗”两层（柔光，不会把之前的修图盖掉），蒙版全黑。选中了提亮的蒙版：白色软画笔 20% 轻涂。"
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
@@ -915,7 +915,7 @@ def find_group(image):
 
 
 def ensure_group(image):
-    """The 「插件改动」 group at the top of the stack; created if missing."""
+    """The “插件改动” group at the top of the stack; created if missing."""
     g = find_group(image)
     if g is not None:
         return g
@@ -943,7 +943,7 @@ def start_retouch(image):
     for l in image.get_layers():
         if l.get_name() == BACKUP_NAME:
             ensure_group(image)
-            return "已经开始过了：原图备份和「插件改动」组都在。"
+            return "已经开始过了：原图备份和“插件改动”组都在。"
     photo = _photo_layer(image)
     if photo is None:
         raise RuntimeError("这张图里没有可用的图层")
@@ -963,25 +963,25 @@ def start_retouch(image):
     finally:
         image.undo_group_end()
     Gimp.displays_flush()
-    return "好了：原图已备份并锁住（最底下，隐藏），上面建了「插件改动」组。"
+    return "好了：原图已备份并锁住（最底下，隐藏），上面建了“插件改动”组。"
 
 
 # ---- batch 2 item 9: per-button usage help (tooltip + ? popup) ----
 HELP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "help")
 # label -> (2-3 plain lines: what / how to paint / when, thumbnail key or None)
 BUTTON_HELP = {
-    "开始修这张": ("备份一份原图并锁住，建「插件改动」组。\n不用涂，点一下就行。\n每张图第一步先点它。", None),
+    "开始修这张": ("备份一份原图并锁住，建“插件改动”组。\n不用涂，点一下就行。\n每张图第一步先点它。", None),
     "去除瑕疵": ("建空的修复层，切到修复画笔。\n按住 Ctrl 点干净皮肤取样，再点痘痘、斑点。\n先去瑕疵，再做别的。", None),
     "去油光": ("压暗反光的油亮处；只压暗，不会把之前的修图盖掉。\n蒙版全黑，白色软画笔 20% 在额头、鼻头、下巴的亮斑上轻涂。\n脸上反光明显时用。", "deshine"),
     "高低频": ("把照片拆成两层：低频管颜色和明暗，高频管毛孔纹理。\n低频用软笔刷涂匀色块；高频用修复/仿制修纹理。\n原图有备份，不会丢。要细修皮肤时用。", None),
-    "加深减淡": ("建「提亮」「压暗」两层，蒙版全黑。\n白色软画笔低不透明度：亮的地方涂压暗，暗的地方涂提亮。\n修凹凸不平、塑造轮廓时用。", "dnb"),
-    "轻柔涂抹": ("在加深减淡层上按很低的流量慢慢涂。\n来回多涂几次叠加效果。\n做完「加深减淡」后用。", None),
+    "加深减淡": ("建“提亮”“压暗”两层，蒙版全黑。\n白色软画笔低不透明度：亮的地方涂压暗，暗的地方涂提亮。\n修凹凸不平、塑造轮廓时用。", "dnb"),
+    "轻柔涂抹": ("在加深减淡层上按很低的流量慢慢涂。\n来回多涂几次叠加效果。\n做完“加深减淡”后用。", None),
     "磨皮": ("还没做。", None),
     "皮肤减红": ("降低皮肤的红色，不会发亮。\n蒙版全黑，白色软画笔在发红的脸颊、鼻翼轻涂。\n涂满会发灰，20% 轻涂即可。", "dered"),
     "统一肤色": ("把皮肤颜色轻轻往统一的肤色靠，保留纹理。\n蒙版全黑，白色软画笔 20% 在色块不匀的地方轻涂。\n脸上颜色深一块浅一块时用。", "unify"),
     "按脸液化": ("自动找到脸，用滑块调眼睛大小、下颌、鼻宽。\n点了会弹出对话框，不用涂，拖滑块看预览。\n想整体微调脸型时用。", None),
     "液化": ("网格液化：推、膨胀、收缩、旋转、还原。\n点了会弹出对话框，在里面用笔刷拖动。\n局部修形（发际、轮廓）时用，幅度要小。", None),
-    "眼部修饰": ("先框选眼睛再点；白色软画笔涂眼白（提亮、去红血丝）。\n瞳孔：在图层面板点「瞳孔提亮」组的蒙版，再在瞳孔上涂。\n⚙ 调力度，默认眼白 28、瞳孔 30。", "eye"),
+    "眼部修饰": ("先框选眼睛再点；白色软画笔涂眼白（提亮、去红血丝）。\n瞳孔：在图层面板点“瞳孔提亮”组的蒙版，再在瞳孔上涂。\n⚙ 调力度，默认眼白 28、瞳孔 30。", "eye"),
     "牙齿美白": ("提亮牙齿并去黄，不会变成死白。只在露出牙齿的照片上用。\n先框选牙齿再点；选区只圈牙齿，别圈到嘴唇。\n白色软画笔 20% 只涂牙齿。", None),
     "卧蚕压色": ("把眼下发暗发青的地方压暗并去色。蒙版全黑，白色软画笔沿卧蚕涂。\n涂满会很重，只用 20% 轻涂一两遍；\n觉得重就点 ⚙ 调小。", "undereye"),
     "选择主体": ("把整个人或脸部皮肤做成选区（边缘略虚）。\n点了会弹出对话框，在里面选范围，不用涂。\n只想改人或只改背景时用。", None),
@@ -1033,7 +1033,7 @@ class Panel:
         outer.pack_start(help_l, False, False, 0)
 
         self.img_combo = Gtk.ComboBoxText()
-        self.img_combo.set_tooltip_text("要修的图片。打开了新图后点「刷新」")
+        self.img_combo.set_tooltip_text("要修的图片。打开了新图后点“刷新”")
         row = Gtk.Box(spacing=4)
         row.pack_start(self.img_combo, True, True, 0)
         rb = Gtk.Button(label="刷新")
@@ -1069,7 +1069,7 @@ class Panel:
                 cell = Gtk.Box(spacing=2)
                 cell.pack_start(b, True, True, 0)
                 q = Gtk.Button(label="?")
-                q.set_tooltip_text("「%s」怎么用（附前后对比）" % label)
+                q.set_tooltip_text("“%s”怎么用（附前后对比）" % label)
                 q.connect("clicked", lambda _w, lab=label: self.help_dialog(lab))
                 cell.pack_start(q, False, False, 0)
                 if name in WS:
@@ -1213,10 +1213,20 @@ class Panel:
             res = proc.run(cfg)
             st = res.index(0)
             self.status.set_text("完成" if st == Gimp.PDBStatusType.SUCCESS else
-                                 ("已取消" if st == Gimp.PDBStatusType.CANCEL else "没做成：%s" % name))
+                                 ("对话框已关闭，没有改动" if st == Gimp.PDBStatusType.CANCEL else "没做成：%s" % name))
         except Exception as e:
             self.status.set_text("出错：%s" % e)
+        finally:
+            # dialogs of other plug-ins / ⚙ dialogs leave the panel behind the image window
+            GLib.idle_add(self._raise_panel)
         Gimp.displays_flush()
+
+    def _raise_panel(self):
+        try:
+            self.win.present()
+        except Exception:
+            pass
+        return False
 
     def help_dialog(self, label):
         d = Gtk.Dialog(title="怎么用：" + label, transient_for=self.win, modal=False)
@@ -1243,6 +1253,7 @@ class Panel:
             box.pack_start(note, False, False, 0)
         d.connect("response", lambda w, _r: w.destroy())
         d.show_all()
+        d.resize(420, 1)   # shrink to content (text-only popups had ~100px blank)
 
     def eye_dialog(self, image):
         st = eye_strengths()
@@ -1322,7 +1333,8 @@ class Panel:
 
 
 def run(procedure, run_mode, image, drawables, config, data):
-    if run_mode != Gimp.RunMode.INTERACTIVE:
+    # Filters > Repeat / Re-show re-invoke with WITH_LAST_VALS; that is still a user click, so open the panel.
+    if run_mode == Gimp.RunMode.NONINTERACTIVE:
         return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
                                            GLib.Error("人像面板只能交互使用 / interactive only"))
     GimpUi.init(PROC)

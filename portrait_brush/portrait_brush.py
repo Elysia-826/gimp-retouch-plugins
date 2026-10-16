@@ -47,7 +47,7 @@ def _brush(name):
         b = Gimp.Brush.get_by_name(name)
     if b is None:
         raise RuntimeError(
-            "没有找到笔刷「%s」。请用安装脚本装上 portrait_brush 组件（笔刷放在 GIMP 配置目录的 brushes/portrait-retouch/）。"
+            "没有找到笔刷“%s”。请用安装脚本装上 portrait_brush 组件（笔刷放在 GIMP 配置目录的 brushes/portrait-retouch/）。"
             " / Brush not found; install the portrait_brush component." % name)
     return b
 

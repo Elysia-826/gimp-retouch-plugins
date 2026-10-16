@@ -16,7 +16,7 @@ pdb = Gimp.get_pdb()
 assert pdb.procedure_exists(pp.PROC), pp.PROC
 labels = {lab: n for _g, _t, items in pp.GROUPS for lab, n, _tip in items}
 assert labels.get("一键锐化") == "__sharp_oneclick__" and labels.get("更新锐化") == "__sharp_refresh__", labels
-for lab in ("锐化", "一键锐化", "更新锐化"):
+for lab in ("涂抹锐化", "一键锐化", "更新锐化"):
     assert 2 <= len(pp.help_text(lab).splitlines()) <= 3, lab
 
 

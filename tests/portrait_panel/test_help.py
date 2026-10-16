@@ -20,11 +20,26 @@ for lab in labels:
             pb = GdkPixbuf.Pixbuf.new_from_file(p)
             assert pb.get_width() == 240, (p, pb.get_width())
     print("HELP %s lines=%d thumbs=%s" % (lab, n, bool(th)), flush=True)
-assert "更新锐化" in pp.help_text("锐化")
+assert "更新锐化" in pp.help_text("涂抹锐化")
 assert pp.help_thumbs("牙齿美白") is None
 assert "会替换照片层" not in pp.help_text("高低频")
-for lab in ("液化", "按脸液化", "选择主体", "导出"):
-    assert "会弹出对话框" in pp.help_text(lab), lab
+for lab in ("手动液化", "脸型微调", "选择主体", "导出图片", "设好笔刷"):
+    assert "打开对话框" in pp.help_text(lab), lab
+# rename table + Elysia's overrides
+assert [t for _g, t, _i in pp.GROUPS] == ["第一步", "皮肤", "五官和脸型", "小工具", "收尾"]
+for keep in ("高低频", "眼部修饰", "牙齿美白", "卧蚕压色", "选择主体", "去油光", "磨皮", "一键锐化", "更新锐化"):
+    assert keep in labels, keep
+for old in ("开始修这张", "去除瑕疵", "加深减淡", "轻柔涂抹", "皮肤减红", "统一肤色", "按脸液化", "液化", "人像笔刷",
+            "看看涂到哪了", "看涂到哪", "涂擦切换", "播放动作", "锐化", "导出", "分开颜色纹理", "亮眼", "白牙", "淡化眼下", "选出人物"):
+    assert old not in labels, old
+assert "显示涂抹范围" in labels and "涂/擦切换" in labels
+assert [l for l, _n, _t in pp.GROUPS[-1][2]][-1] == "导出图片"
+assert "“涂抹锐化”的 ⚙" in pp.help_text("一键锐化")
+# help/messages must only reference button names that exist
+import re as _re
+allt = pp.HELP + "".join(t for t, _k in pp.BUTTON_HELP.values())
+for gone in ("分开颜色纹理", "选出人物", "“亮眼”", "“白牙”", "淡化眼下", "开始修这张", "“锐化”旁边"):
+    assert gone not in allt, gone
 assert set(pp.BUTTON_HELP) == set(labels), set(pp.BUTTON_HELP) ^ set(labels)
 for lab, (txt, _k) in pp.BUTTON_HELP.items():
     assert "「" not in txt and "」" not in txt, lab
@@ -46,5 +61,5 @@ assert not pp.ping_existing(lk)
 srv = pp.claim_instance(lk); assert int(open(lk).read().split()[0]) == srv.getsockname()[1]
 pp.release_instance(srv, lk)
 print("SINGLE INSTANCE OK", flush=True)
-assert "“提亮”和“压暗”" in pp.help_text("加深减淡")
+assert "“提亮”" in pp.help_text("提亮压暗")
 print("HELP ALL OK", len(labels), flush=True)

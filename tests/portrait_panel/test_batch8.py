@@ -54,12 +54,12 @@ def find(name):
 
 # --- button wiring: labels + PDB / ws keys ---
 want = {
-    "液化": "python-fu-mesh-liquify",
-    "按脸液化": "python-fu-mesh-liquify-face",
+    "手动液化": "python-fu-mesh-liquify",
+    "脸型微调": "python-fu-mesh-liquify-face",
     "选择主体": "python-fu-subject-select",
-    "人像笔刷": "python-fu-portrait-brush",
-    "锐化": "ws:sharpen",
-    "导出": "python-fu-batch-export",
+    "设好笔刷": "python-fu-portrait-brush",
+    "涂抹锐化": "ws:sharpen",
+    "导出图片": "python-fu-batch-export",
 }
 flat = {lab: name for _g, _t, items in pp.GROUPS for lab, name, _tip in items}
 for lab, name in want.items():
@@ -68,8 +68,8 @@ for lab, name in want.items():
     assert got == name, (lab, got, name)
 
 # none of these should be None / "还没做"
-assert flat.get("锐化") is not None and flat.get("锐化") != None
-assert "还没做" not in str([tip for _g, _t, items in pp.GROUPS for lab, name, tip in items if lab == "锐化"])
+assert flat.get("涂抹锐化") is not None and flat.get("涂抹锐化") != None
+assert "还没做" not in str([tip for _g, _t, items in pp.GROUPS for lab, name, tip in items if lab == "涂抹锐化"])
 
 # PDB existence (plugins must be installed into GIMP3_DIRECTORY)
 pdb = Gimp.get_pdb()

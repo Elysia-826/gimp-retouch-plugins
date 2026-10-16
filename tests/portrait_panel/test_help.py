@@ -60,6 +60,13 @@ open(lk, "w").write("1 999999\n")                     # stale lock (dead port)
 assert not pp.ping_existing(lk)
 srv = pp.claim_instance(lk); assert int(open(lk).read().split()[0]) == srv.getsockname()[1]
 pp.release_instance(srv, lk)
+# lock is per running GIMP: another GIMP (different parent pid) gets its own lock and is not blocked
+assert pp.lock_path_for(111) != pp.lock_path_for(222)
+assert pp.LOCK_PATH == pp.lock_path_for(os.getppid()) and str(os.getppid()) in pp.LOCK_PATH
+lk1, lk2 = pp.lock_path_for(10 ** 9 + 1), pp.lock_path_for(10 ** 9 + 2)
+srv = pp.claim_instance(lk1)
+assert not pp.ping_existing(lk2)                     # panel in "other GIMP" does not block this one
+pp.release_instance(srv, lk1)
 print("SINGLE INSTANCE OK", flush=True)
 assert "“提亮”" in pp.help_text("提亮压暗")
 print("HELP ALL OK", len(labels), flush=True)

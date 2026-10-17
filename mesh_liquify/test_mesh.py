@@ -943,10 +943,10 @@ def _absdiff(a, b, w, h, pred):
 
 fe = 0.06 * 320
 inter = 254.4 - 145.6
-eyes_in = lambda x, y: _ell(145.6, 190, 0.12 * inter, 0.08 * inter)(x, y) or _ell(254.4, 190, 0.12 * inter, 0.08 * inter)(x, y)
-eyes_out = lambda x, y: _ell(145.6, 190, 0.12 * inter + fe + 2, 0.08 * inter + fe + 2)(x, y) or _ell(254.4, 190, 0.12 * inter + fe + 2, 0.08 * inter + fe + 2)(x, y)
+eyes_in = lambda x, y: _ell(145.6, 190, 0.26 * inter, 0.18 * inter)(x, y) or _ell(254.4, 190, 0.26 * inter, 0.18 * inter)(x, y)
+eyes_out = lambda x, y: _ell(145.6, 190, 0.26 * inter + fe + 2, 0.18 * inter + fe + 2)(x, y) or _ell(254.4, 190, 0.26 * inter + fe + 2, 0.18 * inter + fe + 2)(x, y)
 band = lambda x, y: eyes_out(x, y) and not eyes_in(x, y)
-nose_out = _ell(200, 258, 0.14 * inter + fe + 2, 0.06 * inter + fe + 2)
+nose_out = _ell(200, 258 - 0.01 * inter, 0.30 * inter + fe + 2, 0.13 * inter + fe + 2)
 jaw_out = lambda x, y: _ell(110.4, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y) or _ell(289.6, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y)
 
 w, h, r0, r1 = _part_case()
@@ -966,7 +966,7 @@ print("MESH_TEST part_eye inside=%d outside=%d cheek=%d forehead=%d jaw=%d band_
     e_in, e_out, cheek, fore, jawz, b_on, b_off, off_out), flush=True)
 if pz != 0:
     die("part: slider 0 changed pixels")
-if e_in < 5 or e_out != 0 or cheek or fore or jawz:
+if e_in < 1000 or e_out != 0 or cheek or fore or jawz:
     die("part: eye moved outside its area")
 if not (0 < b_on < b_off):
     die("part: eye feather band is not partial")
@@ -979,10 +979,10 @@ print("MESH_TEST part_jaw inside=%d eyes=%d nose=%d outside=%d" % (j_in, j_eye, 
 if j_in < 20 or j_eye or j_nose or j_out:
     die("part: jaw moved eyes, nose or outside")
 w, h, r0, rn = _part_case(nose=15.0)
-n_in, _ = count_diff(r0, rn, w, h, 4, lambda x, y: abs(x - 200) <= 25 and abs(y - 258) <= 10)
+n_in, _ = count_diff(r0, rn, w, h, 4, lambda x, y: abs(x - 200) <= 40 and abs(y - 262) <= 14)
 n_out, _ = count_diff(r0, rn, w, h, 4, lambda x, y: not nose_out(x, y))
 print("MESH_TEST part_nose inside=%d outside=%d" % (n_in, n_out), flush=True)
-if n_in < 10 or n_out:
+if n_in < 300 or n_out:
     die("part: nose moved outside its area")
 w, h, r0, rf = _part_case(jaw=20.0, freeze_rect=(0, 300, 150, 480))
 f_fr, _ = count_diff(r0, rf, w, h, 4, lambda x, y: x < 150 and y >= 300)
@@ -990,5 +990,41 @@ f_rt, _ = count_diff(r0, rf, w, h, 4, lambda x, y: abs(x - 290) <= 30 and abs(y 
 print("MESH_TEST part_user_freeze frozen=%d right_jaw=%d" % (f_fr, f_rt), flush=True)
 if f_fr or f_rt < 20:
     die("part: user freeze did not win")
+
+# realistic photo, auto face: eye and nose move clearly inside, 0 outside
+photo = "/tmp/liq_gui_test.jpg"
+if os.path.isfile(photo):
+    import json
+    for pname, kw, need in (("eye+14", {"eye": 14.0}, 50000), ("nose-14", {"nose": -14.0}, 15000), ("nose+14", {"nose": 14.0}, 15000)):
+        imgp = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(photo))
+        layp = imgp.get_layers()[0]
+        if not layp.has_alpha():
+            layp.add_alpha()
+        pw, ph, p0 = pixels(layp, "R'G'B'A u8")
+        args = {"source": "auto", "eye": 0.0, "jaw": 0.0, "nose": 0.0, "freeze": "none", "freeze-feather": 0.0}
+        args.update(kw)
+        call_named("python-fu-mesh-liquify-face", imgp, layp, **args)
+        _, _, p1 = pixels(layp, "R'G'B'A u8")
+        f = json.load(open("/tmp/mesh-liquify-face-last.json", encoding="utf-8"))
+        it = abs(f["left_eye"][0] - f["right_eye"][0])
+        pf = 0.06 * f["box"][2] + 3
+        if pname.startswith("eye"):
+            ells = [(f[k][0], f[k][1], 0.26 * it + pf, 0.18 * it + pf) for k in ("right_eye", "left_eye")]
+        else:
+            ells = [(f["nose"][0], f["nose"][1] - 0.01 * it, 0.30 * it + pf, 0.13 * it + pf)]
+        n_in = n_out = 0
+        for i in range(0, len(p0), 4):
+            if p0[i:i + 3] != p1[i:i + 3]:
+                px_, py_ = (i // 4) % pw + 0.5, (i // 4) // pw + 0.5
+                if any(((px_ - cx) / ax) ** 2 + ((py_ - cy) / ay) ** 2 <= 1.0 for cx, cy, ax, ay in ells):
+                    n_in += 1
+                else:
+                    n_out += 1
+        print("MESH_TEST photo_%s inside=%d outside=%d" % (pname, n_in, n_out), flush=True)
+        if n_in < need or n_out:
+            die("photo %s: too weak or moved outside" % pname)
+        imgp.delete()
+else:
+    print("MESH_TEST photo skipped (no %s)" % photo, flush=True)
 
 print("MESH_TEST OK", flush=True)

@@ -1248,9 +1248,9 @@ def _part_regions(face, feather):
     inter = abs(face["left_eye"][0] - face["right_eye"][0])
     fw = face["box"][2]
     fe = float(feather) if feather > 0.0 else max(4.0, 0.06 * fw)
-    eyes = [_ellipse_weight(face[k][0], face[k][1], 0.12 * inter, 0.08 * inter, fe) for k in ("right_eye", "left_eye")]
+    eyes = [_ellipse_weight(face[k][0], face[k][1], 0.26 * inter, 0.18 * inter, fe) for k in ("right_eye", "left_eye")]
     nx, ny = face["nose"]
-    nose = [_ellipse_weight(nx, ny, 0.14 * inter, 0.06 * inter, fe)]
+    nose = [_ellipse_weight(nx, ny - 0.01 * inter, 0.30 * inter, 0.13 * inter, fe)]
     left, right = _jaw_ends(face)
     jaw = [_ellipse_weight(p[0], p[1], 0.12 * fw, 0.12 * fw, fe) for p in (left, right)]
     def union(ws):
@@ -1294,12 +1294,12 @@ def _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze
         if regions is not None and mesh.bw:
             _limit_to_part(mesh, before, regions[name])
     inter = abs(face["left_eye"][0] - face["right_eye"][0])
-    eye_r = max(8.0, 0.16 * inter)
+    eye_r = max(8.0, 0.24 * inter)
     if abs(eye) >= 0.05:
         before = start()
         mode = "bloat" if eye > 0.0 else "pinch"
         for key in ("right_eye", "left_eye"):
-            dab(mode, face[key][0], face[key][1], eye_r, abs(eye))
+            dab(mode, face[key][0], face[key][1], eye_r, 3.0 * abs(eye))
         finish("eye", before)
     if abs(jaw) >= 0.05:
         before = start()
@@ -1316,14 +1316,15 @@ def _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze
     if abs(nose) >= 0.05:
         before = start()
         nx, ny = face["nose"]
-        half = max(4.0, 0.12 * inter)
-        nose_r = max(8.0, 0.10 * inter)
+        half = max(4.0, 0.16 * inter)
+        nose_r = max(8.0, 0.12 * inter)
+        ny += 0.04 * inter
         if nose > 0.0:
             a_left, a_right = 0.0, 180.0
         else:
             a_left, a_right = 180.0, 0.0
-        dab("push", nx - half, ny, nose_r, abs(nose), a_left)
-        dab("push", nx + half, ny, nose_r, abs(nose), a_right)
+        dab("push", nx - half, ny, nose_r, 3.0 * abs(nose), a_left)
+        dab("push", nx + half, ny, nose_r, 3.0 * abs(nose), a_right)
         finish("nose", before)
     return touched
 
@@ -1535,7 +1536,7 @@ class MeshLiquify(Gimp.PlugIn):
         p.set_menu_label("按脸调整 / Face Adjust")
         p.add_menu_path("<Image>/Filters/修图工具/")
         p.set_documentation(
-            "Slight eye size and a soft jaw (plus nose width) on one detected face, using the same mesh liquify. 在一张脸上轻微改眼睛大小、下颌宽窄，以及鼻翼。",
+            "Eye size (+ = larger), jaw (+ = narrower) and nose width (+ = narrower) on one face, using the same mesh liquify. 在一张脸上改眼睛大小（正数变大）、下颌宽窄（正数变窄）、鼻翼宽窄（正数变窄）。",
             "Auto uses YuNet (five points: two eyes, nose tip, two mouth corners) via the host Python OpenCV. "
             "If that is missing, or no face is found, nothing is changed. Manual box is not a detector: it only places the same sliders on a rectangle you give. "
             "One dialog confirm is one undoable stroke (撤销上一笔液化). Slider 0 does nothing. Not verified by hand. 尚未人工验证。",
@@ -1545,13 +1546,13 @@ class MeshLiquify(Gimp.PlugIn):
         src.add("auto", 0, "Detect / 自动认脸", "YuNet on this layer. If no face is found, nothing changes. 找不到脸就不改。")
         src.add("box", 1, "Manual box / 手动画框", "Not detection. You give a rough face rectangle; eyes, jaw and nose are placed by proportion. 不是认脸，只按你给的框估计位置。")
         p.add_choice_argument("source", "Face source / 脸的位置", "Automatic detection, or a box you place.", src, "auto", F)
-        p.add_double_argument("eye", "Eye size / 眼睛大小 (-20..20)",
+        p.add_double_argument("eye", "眼睛大小（正数=变大）/ Eye size (+ = larger)",
                               "0 = no change. Positive makes both eyes slightly larger, negative slightly smaller. 0 不动。正数两眼一起略放大。",
                               -20.0, 20.0, 0.0, F)
-        p.add_double_argument("jaw", "Jaw / 下颌 (-30..30)",
+        p.add_double_argument("jaw", "下颌（正数=变窄）/ Jaw (+ = narrower)",
                               "0 = no change. Positive narrows the jaw softly, negative widens it. 0 不动。正数把下颌往里收，负数放宽。",
                               -30.0, 30.0, 0.0, F)
-        p.add_double_argument("nose", "Nose width / 鼻宽 (-20..20)",
+        p.add_double_argument("nose", "鼻宽（正数=变窄）/ Nose width (+ = narrower)",
                               "0 = no change. Positive narrows, negative widens. From the same nose point. 0 不动。正数收窄。",
                               -20.0, 20.0, 0.0, F)
         p.add_double_argument("box-x", "Manual box X / 手动画框左", "Layer pixels. Used only for manual box.", -100000.0, 1000000.0, 0.0, F)

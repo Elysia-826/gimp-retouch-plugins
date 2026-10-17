@@ -833,10 +833,16 @@ if st == Gimp.PDBStatusType.SUCCESS or nd != 0 or _groups(imgn):
     die("missing face should change nothing and report an error")
 imgn.delete()
 
-# selfie
-selfie = "/workspace/retouch-trial/before.jpg"
-if not os.path.isfile(selfie):
+# selfie (repo astronaut.jpg in CI; optional local before.jpg; MESH_TEST_SELFIE overrides)
+_selfie_cands = [
+    os.environ.get("MESH_TEST_SELFIE", ""),
+    "/workspace/retouch-trial/before.jpg",
+    os.path.join(os.getcwd(), "tests", "data", "astronaut.jpg"),
+]
+selfie = next((c for c in _selfie_cands if c and os.path.isfile(c)), None)
+if not selfie:
     die("selfie missing")
+print("MESH_TEST selfie path=%s" % selfie, flush=True)
 imgs = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(selfie))
 lays = [l for l in imgs.get_layers() if not l.is_group()]
 if not lays:
@@ -847,7 +853,9 @@ _, _, s0 = pixels(lays, "R'G'B'A u8")
 frs = Gimp.Layer.new(imgs, "冻结", sw, sh, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
 imgs.insert_layer(frs, None, 0)
 frs.get_buffer().set(Gegl.Rectangle.new(0, 0, sw, sh), "R'G'B'A u8", bytes([0, 0, 0, 255]) * (sw * sh))
-frs.get_buffer().set(Gegl.Rectangle.new(1700, 0, sw - 1700, sh), "R'G'B'A u8", bytes([255, 255, 255, 255]) * ((sw - 1700) * sh))
+# freeze right ~18% of width (was x=1700 on 2076px before.jpg)
+_fx = max(1, min(sw - 1, int(round(sw * 0.82))))
+frs.get_buffer().set(Gegl.Rectangle.new(_fx, 0, sw - _fx, sh), "R'G'B'A u8", bytes([255, 255, 255, 255]) * ((sw - _fx) * sh))
 frs.update(0, 0, sw, sh)
 Gimp.Selection.none(imgs)
 st0, err0 = call_status("python-fu-mesh-liquify-face", imgs, lays, source="auto",
@@ -954,7 +962,13 @@ def _nose_part(f, pad=1.0):
 def _jaw_part(f, pad=1.0):
     import ast, base64
     ns = {"math": math, "base64": base64}
-    for node in ast.parse(open("/workspace/retouch-plugins/mesh_liquify/mesh_liquify.py", encoding="utf-8").read()).body:
+    _ml_py = next((c for c in (
+        os.path.join(os.getcwd(), "mesh_liquify", "mesh_liquify.py"),
+        "/workspace/retouch-plugins/mesh_liquify/mesh_liquify.py",
+    ) if os.path.isfile(c)), None)
+    if not _ml_py:
+        die("mesh_liquify.py missing for part_jaw outline")
+    for node in ast.parse(open(_ml_py, encoding="utf-8").read()).body:
         if isinstance(node, ast.FunctionDef) and node.name in ("_jaw_outline", "_jaw_gate", "_jaw_frame"):
             exec(compile(ast.Module([node], []), "mesh_liquify.py", "exec"), ns)
     cx, cy, ux, uy, tables, _, v_top, v_bot, v_nose, b, u0 = ns["_jaw_frame"](f, 0.0)

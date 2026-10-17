@@ -5,12 +5,13 @@ import importlib.util, os, math
 import gi
 gi.require_version("Gimp", "3.0"); gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, Gegl, Gio
+import os
 
 __import__("sys").path.insert(0, os.path.abspath("."))
 spec = importlib.util.spec_from_file_location("pp", os.path.abspath("portrait_panel/portrait_panel.py"))
 pp = importlib.util.module_from_spec(spec); spec.loader.exec_module(pp)
 
-img = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path("/workspace/retouch-trial/before.jpg"))
+img = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(os.environ.get("PP_TEST_IMAGE", "tests/data/astronaut.jpg")))
 BOX = (900, 2000, 200, 200)   # cheek/detail box for sharpen contrast
 
 

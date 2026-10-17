@@ -1,7 +1,8 @@
 # Numbers for review: runs deshine_helper on /tmp/ds_in.ppm (before.jpg as PPM). FL=1 for 闪光灯硬光.
 import cv2,numpy as np,subprocess,sys,os
 FL=os.environ.get('FL','0')
-subprocess.run([sys.executable,'/workspace/retouch-plugins/de_shine/deshine_helper.py','/workspace/retouch-plugins/mesh_liquify/face_detection_yunet_2023mar.onnx','/tmp/ds_in.ppm','-','/tmp/ds_out.ppm','/tmp/ds_m.pgm','50','30','1',FL],stderr=subprocess.DEVNULL)
+_ROOT=os.path.abspath(os.path.join(os.path.dirname(__file__),'..','..'))
+subprocess.run([sys.executable,os.path.join(_ROOT,'de_shine','deshine_helper.py'),os.path.join(_ROOT,'mesh_liquify','face_detection_yunet_2023mar.onnx'),'/tmp/ds_in.ppm','-','/tmp/ds_out.ppm','/tmp/ds_m.pgm','50','30','1',FL],stderr=subprocess.DEVNULL)
 a=cv2.imread('/tmp/ds_in.ppm');b=cv2.imread('/tmp/ds_out.ppm');m=cv2.imread('/tmp/ds_m.pgm',0).astype(float)
 L=lambda x:cv2.cvtColor(x,cv2.COLOR_BGR2LAB)[:,:,0].astype(float)*100/255
 La=L(a)

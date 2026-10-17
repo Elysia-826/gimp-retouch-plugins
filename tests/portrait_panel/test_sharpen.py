@@ -9,7 +9,7 @@ Gegl.init(None)
 __import__("sys").path.insert(0, os.path.abspath("."))
 spec = importlib.util.spec_from_file_location("pp", os.path.abspath("portrait_panel/portrait_panel.py"))
 pp = importlib.util.module_from_spec(spec); spec.loader.exec_module(pp)
-SRC = os.environ.get("PP_TEST_IMAGE", "/workspace/retouch-trial/before.jpg")
+SRC = os.environ.get("PP_TEST_IMAGE", "tests/data/astronaut.jpg")
 print("SHARP version", pp.gimp_version(), "filters", pp.has_drawable_filters(), flush=True)
 
 # registration

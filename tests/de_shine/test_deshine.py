@@ -6,7 +6,7 @@ gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, Gegl, Gio
 Gegl.init(None)
 pdb = Gimp.get_pdb()
-SRC = os.environ.get("DESHINE_TEST_IMAGE", "/workspace/retouch-trial/before.jpg")
+SRC = os.environ.get("DESHINE_TEST_IMAGE", "tests/data/astronaut.jpg")
 NECK = [int(v) for v in os.environ.get("DESHINE_NECK", "500,2850,800,3150").split(",") if v]
 
 

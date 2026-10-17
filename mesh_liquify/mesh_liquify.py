@@ -717,7 +717,7 @@ def prepare_stroke_layer(image, layer):
     Gimp.displays_flush()
 
 def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise, weights, wx, wy, ww, wh,
-           freeze_src=None, freeze_feather=0.0, layer=None, sample=None, poly=None, reverse=False):
+           freeze_src=None, freeze_feather=0.0, layer=None, sample=None, poly=None, reverse=False, clean=True):
     """Add one soft brush to the mesh. Returns True if any sample was visited."""
     # Painted strokes have no pen order. Default is left-to-right (vertical:
     # top-to-bottom). Reverse flips that tangent so a horizontal line pushes
@@ -893,7 +893,7 @@ def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockw
                 a[i] += ddx * s
                 a[i + 1] += ddy * s
             touched = True
-    if touched and mode != "restore":
+    if touched and clean and mode != "restore":
         _clean_edges(mesh, sample if sample is not None else layer, gate, gx, gy, gw, gh)
     if touched and mesh.max_abs() < 1e-3:
         mesh.x = mesh.y = mesh.bw = mesh.bh = 0
@@ -1244,13 +1244,30 @@ def _ellipse_weight(cx, cy, ax, ay, fe):
         return _smoother((1.0 - de) / max(1e-6, 1.0 - k))
     return w
 
+def _alae(face):
+    inter = abs(face["left_eye"][0] - face["right_eye"][0])
+    ang = math.atan2(face["left_eye"][1] - face["right_eye"][1], face["left_eye"][0] - face["right_eye"][0])
+    ux, uy = math.cos(ang), math.sin(ang)
+    nx, ny = face["nose"]
+    cy = ny + 0.07 * inter
+    out = []
+    for key, side in (("mouth_right", -1.0), ("mouth_left", 1.0)):
+        mx, my = face[key]
+        dist = abs((mx - nx) * ux + (my - ny) * uy)
+        dist = max(0.15 * inter, min(0.45 * inter, dist))
+        cx = nx + side * 0.65 * dist * ux
+        y = cy + side * 0.65 * dist * uy
+        push = math.degrees(ang) if side < 0 else math.degrees(ang) + 180.0
+        out.append((cx, y, max(8.0, 0.40 * dist), 0.45 * dist, push))
+    return out
+
 def _part_regions(face, feather):
     inter = abs(face["left_eye"][0] - face["right_eye"][0])
     fw = face["box"][2]
     fe = float(feather) if feather > 0.0 else max(4.0, 0.06 * fw)
     eyes = [_ellipse_weight(face[k][0], face[k][1], 0.26 * inter, 0.18 * inter, fe) for k in ("right_eye", "left_eye")]
     nx, ny = face["nose"]
-    nose = [_ellipse_weight(nx, ny - 0.01 * inter, 0.30 * inter, 0.13 * inter, fe)]
+    nose = [_ellipse_weight(ax, ay, rx, 0.13 * inter, fe) for ax, ay, r, rx, p in _alae(face)]
     left, right = _jaw_ends(face)
     jaw = [_ellipse_weight(p[0], p[1], 0.12 * fw, 0.12 * fw, fe) for p in (left, right)]
     def union(ws):
@@ -1281,12 +1298,12 @@ def _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze
                      part_only=True, part_feather=0.0):
     touched = False
     regions = _part_regions(face, part_feather) if part_only else None
-    def dab(mode, x, y, radius, strength, angle=0.0):
+    def dab(mode, x, y, radius, strength, angle=0.0, clean=True):
         nonlocal touched
         if strength <= 0.0 or radius < 1.0:
             return
         if deform(mesh, mode, x, y, -1.0, -1.0, radius, strength, 0.0, angle, True,
-                  weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample, None, False):
+                  weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample, None, False, clean):
             touched = True
     def start():
         return (mesh.x, mesh.y, mesh.bw, mesh.bh, array.array("f", mesh.a))
@@ -1315,16 +1332,8 @@ def _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze
         finish("jaw", before)
     if abs(nose) >= 0.05:
         before = start()
-        nx, ny = face["nose"]
-        half = max(4.0, 0.16 * inter)
-        nose_r = max(8.0, 0.12 * inter)
-        ny += 0.04 * inter
-        if nose > 0.0:
-            a_left, a_right = 0.0, 180.0
-        else:
-            a_left, a_right = 180.0, 0.0
-        dab("push", nx - half, ny, nose_r, 3.0 * abs(nose), a_left)
-        dab("push", nx + half, ny, nose_r, 3.0 * abs(nose), a_right)
+        for ax, ay, r, rx, push in _alae(face):
+            dab("push", ax, ay, r, 3.0 * abs(nose), push if nose > 0.0 else push + 180.0, False)
         finish("nose", before)
     return touched
 

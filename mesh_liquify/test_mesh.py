@@ -946,7 +946,7 @@ inter = 254.4 - 145.6
 eyes_in = lambda x, y: _ell(145.6, 190, 0.26 * inter, 0.18 * inter)(x, y) or _ell(254.4, 190, 0.26 * inter, 0.18 * inter)(x, y)
 eyes_out = lambda x, y: _ell(145.6, 190, 0.26 * inter + fe + 2, 0.18 * inter + fe + 2)(x, y) or _ell(254.4, 190, 0.26 * inter + fe + 2, 0.18 * inter + fe + 2)(x, y)
 band = lambda x, y: eyes_out(x, y) and not eyes_in(x, y)
-nose_out = _ell(200, 258 - 0.01 * inter, 0.30 * inter + fe + 2, 0.13 * inter + fe + 2)
+nose_out = lambda x, y: _ell(200 - 29.12, 258 + 0.07 * inter, 20.16 + fe + 2, 0.13 * inter + fe + 2)(x, y) or _ell(200 + 29.12, 258 + 0.07 * inter, 20.16 + fe + 2, 0.13 * inter + fe + 2)(x, y)
 jaw_out = lambda x, y: _ell(110.4, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y) or _ell(289.6, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y)
 
 w, h, r0, r1 = _part_case()
@@ -995,7 +995,7 @@ if f_fr or f_rt < 20:
 photo = "/tmp/liq_gui_test.jpg"
 if os.path.isfile(photo):
     import json
-    for pname, kw, need in (("eye+14", {"eye": 14.0}, 50000), ("nose-14", {"nose": -14.0}, 15000), ("nose+14", {"nose": 14.0}, 15000)):
+    for pname, kw, need in (("eye+14", {"eye": 14.0}, 50000), ("nose-14", {"nose": -14.0}, 30000), ("nose+14", {"nose": 14.0}, 30000)):
         imgp = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(photo))
         layp = imgp.get_layers()[0]
         if not layp.has_alpha():
@@ -1011,18 +1011,30 @@ if os.path.isfile(photo):
         if pname.startswith("eye"):
             ells = [(f[k][0], f[k][1], 0.26 * it + pf, 0.18 * it + pf) for k in ("right_eye", "left_eye")]
         else:
-            ells = [(f["nose"][0], f["nose"][1] - 0.01 * it, 0.30 * it + pf, 0.13 * it + pf)]
-        n_in = n_out = 0
+            ang = math.atan2(f["left_eye"][1] - f["right_eye"][1], f["left_eye"][0] - f["right_eye"][0])
+            ux, uy = math.cos(ang), math.sin(ang)
+            ells = []
+            for key, side in (("mouth_right", -1.0), ("mouth_left", 1.0)):
+                mx_, my_ = f[key]
+                dd = max(0.15 * it, min(0.45 * it, abs((mx_ - f["nose"][0]) * ux + (my_ - f["nose"][1]) * uy)))
+                ells.append((f["nose"][0] + side * 0.65 * dd * ux, f["nose"][1] + 0.07 * it + side * 0.65 * dd * uy, 0.45 * dd + pf, 0.13 * it + pf))
+        n_in = n_out = n_l = n_r = 0
         for i in range(0, len(p0), 4):
             if p0[i:i + 3] != p1[i:i + 3]:
                 px_, py_ = (i // 4) % pw + 0.5, (i // 4) // pw + 0.5
                 if any(((px_ - cx) / ax) ** 2 + ((py_ - cy) / ay) ** 2 <= 1.0 for cx, cy, ax, ay in ells):
                     n_in += 1
+                    if px_ < f["nose"][0]:
+                        n_l += 1
+                    else:
+                        n_r += 1
                 else:
                     n_out += 1
-        print("MESH_TEST photo_%s inside=%d outside=%d" % (pname, n_in, n_out), flush=True)
+        print("MESH_TEST photo_%s inside=%d outside=%d img_left=%d img_right=%d" % (pname, n_in, n_out, n_l, n_r), flush=True)
         if n_in < need or n_out:
             die("photo %s: too weak or moved outside" % pname)
+        if pname.startswith("nose") and (n_l < 10000 or n_r < 10000 or not 0.5 <= n_l / float(n_r) <= 2.0):
+            die("photo %s: alae not balanced" % pname)
         imgp.delete()
 else:
     print("MESH_TEST photo skipped (no %s)" % photo, flush=True)

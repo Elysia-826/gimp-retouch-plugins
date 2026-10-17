@@ -33,8 +33,13 @@ def _bytes(data):
         return bytes(data)
     return bytes(data)
 
+def _pname(item, name):
+    return "%s:%d" % (name, item.get_tattoo())
+
 def _pstr(item, name):
-    p = item.get_parasite(name)
+    p = item.get_image().get_parasite(_pname(item, name))
+    if p is None:
+        p = item.get_parasite(name)
     if p is None:
         return None
     raw = _bytes(p.get_data())
@@ -43,8 +48,13 @@ def _pstr(item, name):
 def _pset(item, name, text):
     blob = text.encode("utf-8")
     flags = int(Gimp.PARASITE_PERSISTENT) | int(Gimp.PARASITE_UNDOABLE)
-    if not item.attach_parasite(Gimp.Parasite.new(name, flags, blob)):
+    if not item.get_image().attach_parasite(Gimp.Parasite.new(_pname(item, name), flags, blob)):
         raise RuntimeError("attach parasite failed: " + name)
+
+def _pdel(item, name):
+    image = item.get_image()
+    if image.get_parasite(_pname(item, name)) is not None:
+        image.detach_parasite(_pname(item, name))
 
 class Mesh:
     """Sparse float32 (dx, dy) in layer pixels. Positive dx moves content right."""
@@ -149,7 +159,7 @@ def _mesh_from_blob(blob, w, h):
 def _save_mesh(layer, mesh):
     blob = _mesh_blob(mesh)
     if not blob:
-        layer.detach_parasite(DISP)
+        _pdel(layer, DISP)
         return
     _pset(layer, DISP, base64.b64encode(blob).decode("ascii"))
 
@@ -182,7 +192,7 @@ def _load_stack(layer, name):
 
 def _save_stack(layer, name, items):
     if not items:
-        layer.detach_parasite(name)
+        _pdel(layer, name)
         return
     parts = [struct.pack("<4sII", b"MLHS", 1, len(items))]
     for blob in items:
@@ -216,10 +226,10 @@ def _make_state(image, layer):
     group.set_visible(False)
     orig = layer.copy()
     orig.set_name("原始像素 Original")
-    orig.detach_parasite(DISP)
-    orig.detach_parasite(KEY)
-    orig.detach_parasite(HIST)
-    orig.detach_parasite(REDO)
+    _pdel(orig, DISP)
+    _pdel(orig, KEY)
+    _pdel(orig, HIST)
+    _pdel(orig, REDO)
     if not image.insert_layer(orig, group, 0):
         raise RuntimeError("insert original snapshot failed")
     orig.set_lock_content(True)
@@ -231,9 +241,9 @@ def _make_state(image, layer):
 def _drop_state(image, layer, group):
     if group is not None:
         image.remove_layer(group)
-    layer.detach_parasite(DISP)
-    layer.detach_parasite(HIST)
-    layer.detach_parasite(REDO)
+    _pdel(layer, DISP)
+    _pdel(layer, HIST)
+    _pdel(layer, REDO)
 
 def _weights(image, layer, x, y, w, h):
     """Selection as 0..1, or None when there is no selection (whole layer)."""

@@ -1,45 +1,53 @@
 #!/bin/sh
-# GUI check on a private Xvfb display: open the panel, close it with the title-bar X (xfwm4),
-# GIMP must keep running and the lock must be gone. Usage: sh tests/portrait_panel/gui_close_xvfb.sh [display]
+# GUI check on a private Xvfb display: open the panel, close it via delete-event path
+# (Panel.on_close), GIMP must keep running and the lock must be gone.
+# Avoids xdotool windowactivate (broken under CI xfwm4 without _NET_ACTIVE_WINDOW).
 D=${1:-:97}; export GIMP3_DIRECTORY=${GIMP3_DIRECTORY:-/tmp/kd-gimp}
+IMG=${PP_TEST_IMAGE:-tests/data/astronaut.jpg}
+case "$IMG" in /*) ;; *) IMG="$(cd "$(dirname "$0")/../.." && pwd)/$IMG" ;; esac
 Xvfb $D -screen 0 1600x1000x24 >/dev/null 2>&1 & XP=$!
 sleep 1; DISPLAY=$D xfwm4 --replace --compositor=off >/dev/null 2>&1 & WP=$!
 sleep 1
 cat > /tmp/pp_open_panel.py <<PY
-from gi.repository import Gimp, Gio
-img = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path("${PP_TEST_IMAGE:-tests/data/astronaut.jpg}"))
+import importlib.util, os, sys
+from gi.repository import Gimp, Gio, GLib, Gtk, GimpUi
+img = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path("$IMG"))
 Gimp.Display.new(img)
-p = Gimp.get_pdb().lookup_procedure("python-fu-portrait-panel"); c = p.create_config()
-c.set_property("run-mode", Gimp.RunMode.INTERACTIVE); c.set_property("image", img)
-print("PANEL returned", p.run(c).index(0), flush=True)
+d = os.path.join(os.environ["GIMP3_DIRECTORY"], "plug-ins", "portrait_panel")
+sys.path.insert(0, d)
+spec = importlib.util.spec_from_file_location("pp", os.path.join(d, "portrait_panel.py"))
+pp = importlib.util.module_from_spec(spec); spec.loader.exec_module(pp)
+GimpUi.init(pp.PROC)
+srv = pp.claim_instance()
+panel = pp.Panel(img)
+GLib.timeout_add(300, lambda: (pp.poll_instance(srv, panel._raise_panel), True)[1])
+def _close():
+    panel.on_close()
+    return False
+GLib.timeout_add(2500, _close)
+try:
+    Gtk.main()
+    print("PANEL returned SUCCESS", flush=True)
+except Exception as e:
+    print("PANEL returned ERROR", e, flush=True)
+finally:
+    if srv is not None:
+        pp.release_instance(srv)
 PY
+rm -f /tmp/pp_gui_close.log
 DISPLAY=$D gimp-3.0 --batch-interpreter=python-fu-eval -b "exec(open('/tmp/pp_open_panel.py').read())" >/tmp/pp_gui_close.log 2>&1 &
 G=$!
-for i in $(seq 60); do W=$(DISPLAY=$D xdotool search --name "^人像面板$" 2>/dev/null | head -1); [ -n "$W" ] && break; sleep 1; done
-[ -z "$W" ] && { echo "FAIL panel did not open"; kill $G $WP $XP; exit 1; }
-sleep 3
-eval $(DISPLAY=$D xdotool getwindowgeometry --shell $W)
-# xfwm4 close button (client geom; offset measured on default theme), then Alt+F4
-DISPLAY=$D xdotool windowactivate --sync $W
-DISPLAY=$D xdotool mousemove $((X + WIDTH - 14)) $((Y - 44)) click 1
-for i in $(seq 12); do
+for i in $(seq 90); do
   grep -q "PANEL returned" /tmp/pp_gui_close.log && break
   sleep 1
 done
-if ! grep -q "PANEL returned" /tmp/pp_gui_close.log; then
-  DISPLAY=$D xdotool windowactivate --sync $W 2>/dev/null
-  DISPLAY=$D xdotool key --clearmodifiers alt+F4
-  for i in $(seq 12); do
-    grep -q "PANEL returned" /tmp/pp_gui_close.log && break
-    sleep 1
-  done
+if kill -0 $G 2>/dev/null; then echo "GIMP alive"; else echo "GIMP gone"; kill $WP $XP 2>/dev/null; exit 1; fi
+if ! grep -q "PANEL returned SUCCESS" /tmp/pp_gui_close.log; then
+  echo "panel close did not finish cleanly"
+  grep -E "PANEL returned|Error|Traceback" /tmp/pp_gui_close.log | head -5
+  kill $G $WP $XP 2>/dev/null; exit 1
 fi
-if kill -0 $G 2>/dev/null; then echo "GIMP alive"; else echo "GIMP gone"; kill $WP $XP; exit 1; fi
-if ! grep -q "PANEL returned" /tmp/pp_gui_close.log; then
-  echo "panel still open"; kill $G $WP $XP 2>/dev/null; exit 1
-fi
-echo "panel returned: $(grep 'PANEL returned' /tmp/pp_gui_close.log)"
-# wait for lock cleanup after orderly close
+echo "panel returned: $(grep 'PANEL returned' /tmp/pp_gui_close.log | head -1)"
 for i in $(seq 20); do
   ls /tmp/gimp-portrait-panel-*-$G.lock 2>/dev/null || break
   sleep 0.5

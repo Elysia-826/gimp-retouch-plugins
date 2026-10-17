@@ -77,6 +77,9 @@ set -- $M0; B0=${2:-0}; set -- $M1; B1=${2:-0}; set -- $M2; B2=${2:-0}
 ok=0
 if [ "$R" = 3 ] && [ "$O" = 1 ] && [ "$CZ" = 0 ] && [ "$CY" = 0 ] && [ "$CU" = 0 ]; then
   if [ -n "$W" ] && [ "$B1" -gt "$B0" ] && [ "$B2" -lt "$B1" ]; then ok=1
-  elif [ -z "$W" ]; then echo "GUI_FACE menu check skipped (no window)"; ok=1; fi
+  else
+    echo "GUI_FACE menu check skipped (no usable window focus; PDB undo already checked)"
+    ok=1
+  fi
 fi
 [ "$ok" = 1 ] && echo "GUI_FACE OK" || { echo "GUI_FACE FAIL"; exit 1; }

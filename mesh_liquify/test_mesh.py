@@ -1,6 +1,6 @@
 # Headless functional test for python-fu-mesh-liquify. Run with python-fu-eval.
 # Generates its own patterns. Prints MESH_TEST lines. Exits by raising on failure.
-import math, os, struct, time
+import math, os, struct, tempfile, time
 import gi
 gi.require_version("Gimp", "3.0")
 gi.require_version("Gegl", "0.4")
@@ -474,14 +474,10 @@ def _hipass(raw, w):
     return s / float(n)
 
 def _run_edge(clean):
-    flag = "/tmp/mesh-liquify-no-clean"
-    if clean:
-        if os.path.exists(flag):
-            os.remove(flag)
-    else:
-        open(flag, "w").close()
     im, lay, (ew, eh, e0) = new_image(
         240, 80, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, _edge_paint)
+    if not clean:
+        im.attach_parasite(Gimp.Parasite.new("mesh-liquify-no-clean", 0, b"1"))
     fr = Gimp.Layer.new(im, "冻结", ew, eh, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
     im.insert_layer(fr, None, 0)
     fr.get_buffer().set(Gegl.Rectangle.new(0, 0, ew, eh), "R'G'B'A u8", bytes([0, 0, 0, 255]) * (ew * eh))
@@ -507,9 +503,6 @@ def _run_edge(clean):
 
 wb, wa, hb, ha, fz, fzmax, hidden, state_ok = _run_edge(True)
 wb0, wa0, hb0, ha0, fz0, fzmax0, _, _ = _run_edge(False)
-flag = "/tmp/mesh-liquify-no-clean"
-if os.path.exists(flag):
-    os.remove(flag)
 print("MESH_TEST edge_clean before_width=%.2f after_width=%.2f noclean_after=%.2f hipass %.3f -> %.3f (noclean %.3f) frozen=%d/%d hidden=%s state=%s" % (
     wb, wa, wa0, hb, ha, ha0, fz, fzmax, hidden, state_ok), flush=True)
 if fz != 0 or fz0 != 0:
@@ -864,7 +857,7 @@ st0, err0 = call_status("python-fu-mesh-liquify-face", imgs, lays, source="auto"
 _, _, szero = pixels(lays, "R'G'B'A u8")
 zd, _ = count_diff(s0, szero, sw, sh, 4, lambda x, y: True)
 import json
-info = json.load(open("/tmp/mesh-liquify-face-last.json", encoding="utf-8"))
+info = json.load(open(os.path.join(tempfile.gettempdir(), "mesh-liquify-face-last.json"), encoding="utf-8"))
 print("MESH_TEST face_selfie_detect status=%s zero_diff=%d score=%s box=%s eyes=%s,%s nose=%s" % (
     st0, zd, info.get("score"), [round(v, 1) for v in info["box"]],
     [round(v, 1) for v in info["right_eye"]], [round(v, 1) for v in info["left_eye"]],
@@ -1000,14 +993,14 @@ w, h, r0, rj = _part_case(jaw=20.0)
 j_in, _ = count_diff(r0, rj, w, h, 4, lambda x, y: abs(x - 110) <= 30 and abs(y - 357) <= 30)
 j_eye, _ = count_diff(r0, rj, w, h, 4, eyes_out)
 j_nose, _ = count_diff(r0, rj, w, h, 4, lambda x, y: abs(x - 200) <= 20 and abs(y - 258) <= 12)
-jaw_out = _jaw_part(json.load(open("/tmp/mesh-liquify-face-last.json", encoding="utf-8")), 2.0)
+jaw_out = _jaw_part(json.load(open(os.path.join(tempfile.gettempdir(), "mesh-liquify-face-last.json"), encoding="utf-8")), 2.0)
 j_out, _ = count_diff(r0, rj, w, h, 4, lambda x, y: not jaw_out(x + 0.5, y + 0.5))
 print("MESH_TEST part_jaw inside=%d eyes=%d nose=%d outside=%d" % (j_in, j_eye, j_nose, j_out), flush=True)
 if j_in < 20 or j_eye or j_nose or j_out:
     die("part: jaw moved eyes, nose or outside")
 w, h, r0, rn = _part_case(nose=15.0)
 n_in, _ = count_diff(r0, rn, w, h, 4, lambda x, y: abs(x - 200) <= 40 and abs(y - 262) <= 14)
-nose_out = _nose_part(json.load(open("/tmp/mesh-liquify-face-last.json", encoding="utf-8")))
+nose_out = _nose_part(json.load(open(os.path.join(tempfile.gettempdir(), "mesh-liquify-face-last.json"), encoding="utf-8")))
 n_out, _ = count_diff(r0, rn, w, h, 4, lambda x, y: not nose_out(x + 0.5, y + 0.5))
 print("MESH_TEST part_nose inside=%d outside=%d" % (n_in, n_out), flush=True)
 if n_in < 300 or n_out:
@@ -1033,7 +1026,7 @@ if os.path.isfile(photo):
         args.update(kw)
         call_named("python-fu-mesh-liquify-face", imgp, layp, **args)
         _, _, p1 = pixels(layp, "R'G'B'A u8")
-        f = json.load(open("/tmp/mesh-liquify-face-last.json", encoding="utf-8"))
+        f = json.load(open(os.path.join(tempfile.gettempdir(), "mesh-liquify-face-last.json"), encoding="utf-8"))
         it = abs(f["left_eye"][0] - f["right_eye"][0])
         pf = 0.06 * f["box"][2] + 3
         if pname.startswith("eye"):

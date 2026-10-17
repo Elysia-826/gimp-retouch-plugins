@@ -360,9 +360,12 @@ def _clean_edges(mesh, src, gate, gx, gy, gw, gh):
     moves as one piece. Frozen pixels stay at 0. Skin away from the
     boundary keeps the brush displacement, so texture is not blurred.
     """
-    if os.environ.get("MESH_LIQUIFY_NO_CLEAN") or os.path.exists("/tmp/mesh-liquify-no-clean"):
+    if src is None or os.environ.get("MESH_LIQUIFY_NO_CLEAN"):
         return
-    if mesh.bw < 12 or mesh.bh < 12 or src is None:
+    image = src.get_image()
+    if image is not None and image.get_parasite("mesh-liquify-no-clean"):
+        return
+    if mesh.bw < 12 or mesh.bh < 12:
         return
     lum = _lum_rect(src, mesh.x, mesh.y, mesh.bw, mesh.bh)
     if lum is None:
@@ -1066,7 +1069,7 @@ def _dump_face(face, eye, jaw, nose):
             "jaw_contour": _jaw_outline(face),
             "eye": eye, "jaw_slider": jaw, "nose_slider": nose,
         }
-        with open(os.path.join("/tmp" if os.name != "nt" else tempfile.gettempdir(), "mesh-liquify-face-last.json"), "w", encoding="utf-8") as f:
+        with open(os.path.join(tempfile.gettempdir(), "mesh-liquify-face-last.json"), "w", encoding="utf-8") as f:
             json.dump(payload, f)
     except Exception:
         pass

@@ -1256,35 +1256,92 @@ def _ellipse_weight(cx, cy, ax, ay, fe):
         return _smoother((1.0 - de) / max(1e-6, 1.0 - k))
     return w
 
-def _alae(face):
+def _alae(face, feather):
     inter = abs(face["left_eye"][0] - face["right_eye"][0])
     ang = math.atan2(face["left_eye"][1] - face["right_eye"][1], face["left_eye"][0] - face["right_eye"][0])
     ux, uy = math.cos(ang), math.sin(ang)
     nx, ny = face["nose"]
-    cy = ny + 0.07 * inter
-    out = []
-    for key, side in (("mouth_right", -1.0), ("mouth_left", 1.0)):
+    reach = []
+    for key in ("mouth_right", "mouth_left"):
         mx, my = face[key]
         dist = abs((mx - nx) * ux + (my - ny) * uy)
-        dist = max(0.15 * inter, min(0.45 * inter, dist))
-        cx = nx + side * 0.65 * dist * ux
-        y = cy + side * 0.65 * dist * uy
-        push = math.degrees(ang) if side < 0 else math.degrees(ang) + 180.0
-        out.append((cx, y, max(8.0, 0.40 * dist), 0.45 * dist, push))
-    return out
+        reach.append(max(0.15 * inter, min(0.45 * inter, dist)))
+    band = float(feather) if feather > 0.0 else max(4.0, 0.06 * face["box"][2])
+    return nx, ny, ux, uy, reach, -0.14 * inter, 0.16 * inter, band
+
+def _nose_field(face, nose, feather):
+    nx, ny, ux, uy, reach, v0, v1, band = _alae(face, feather)
+    amount = 0.006 * nose * 0.5 * (reach[0] + reach[1])
+    def field(x, y):
+        dx, dy = x - nx, y - ny
+        u = dx * ux + dy * uy
+        v = -dx * uy + dy * ux
+        if v < v0:
+            kv = 1.0 - _smoother((v0 - v) / band)
+        elif v > v1:
+            kv = 1.0 - _smoother((v - v1) / band)
+        else:
+            kv = 1.0
+        r = reach[0 if u < 0.0 else 1]
+        au = abs(u)
+        ku = min(1.0, au / (0.75 * r)) if au <= r else 1.0 - _smoother((au - r) / band)
+        k = kv * ku
+        if k <= 0.0:
+            return 0.0, 0.0
+        m = (-amount if u > 0.0 else amount) * k
+        return m * ux, m * uy
+    pts = []
+    for su, r in ((-1.0, reach[0]), (1.0, reach[1])):
+        for sv in (v0 - band, v1 + band):
+            uu = su * (r + band)
+            pts.append((nx + uu * ux - sv * uy, ny + uu * uy + sv * ux))
+    xs = [q[0] for q in pts]; ys = [q[1] for q in pts]
+    return field, (int(math.floor(min(xs))) - 1, int(math.floor(min(ys))) - 1, int(math.ceil(max(xs))) + 2, int(math.ceil(max(ys))) + 2)
+
+def _add_field(mesh, field, rect, weights, wx, wy, ww, wh, freeze_src, freeze_feather, layer):
+    x0, y0, x1, y1 = rect
+    if weights is not None:
+        x0, y0, x1, y1 = max(x0, wx), max(y0, wy), min(x1, wx + ww), min(y1, wy + wh)
+    if not mesh.ensure(x0, y0, x1, y1):
+        return False
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(mesh.lw, x1), min(mesh.lh, y1)
+    gate = None
+    if freeze_src is not None and layer is not None:
+        feat = float(freeze_feather) if freeze_feather > 0.0 else 8.0
+        gate = _freeze_gate(_sample_y(freeze_src, layer, x0, y0, x1 - x0, y1 - y0), x1 - x0, y1 - y0, feat)
+    a = mesh.a
+    touched = False
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            k = 1.0
+            if weights is not None:
+                k = weights[(y - wy) * ww + (x - wx)]
+            if gate is not None:
+                k *= gate[(y - y0) * (x1 - x0) + (x - x0)]
+            i = ((y - mesh.y) * mesh.bw + (x - mesh.x)) * 2
+            if k <= 0.0:
+                if gate is not None and (a[i] or a[i + 1]):
+                    a[i] = a[i + 1] = 0.0
+                    touched = True
+                continue
+            fx, fy = field(x + 0.5, y + 0.5)
+            if fx or fy:
+                a[i] += fx * k
+                a[i + 1] += fy * k
+                touched = True
+    return touched
 
 def _part_regions(face, feather):
     inter = abs(face["left_eye"][0] - face["right_eye"][0])
     fw = face["box"][2]
     fe = float(feather) if feather > 0.0 else max(4.0, 0.06 * fw)
     eyes = [_ellipse_weight(face[k][0], face[k][1], 0.26 * inter, 0.18 * inter, fe) for k in ("right_eye", "left_eye")]
-    nx, ny = face["nose"]
-    nose = [_ellipse_weight(ax, ay, rx, 0.13 * inter, fe) for ax, ay, r, rx, p in _alae(face)]
     left, right = _jaw_ends(face)
     jaw = [_ellipse_weight(p[0], p[1], 0.12 * fw, 0.12 * fw, fe) for p in (left, right)]
     def union(ws):
         return lambda x, y: max(f(x, y) for f in ws)
-    return {"eye": union(eyes), "nose": union(nose), "jaw": union(jaw)}
+    return {"eye": union(eyes), "jaw": union(jaw)}
 
 def _limit_to_part(mesh, before, weight):
     bx0, by0, bbw, bbh, ba = before
@@ -1343,10 +1400,9 @@ def _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze
         dab("push", right[0], right[1], jaw_r, abs(jaw), a_right)
         finish("jaw", before)
     if abs(nose) >= 0.05:
-        before = start()
-        for ax, ay, r, rx, push in _alae(face):
-            dab("push", ax, ay, r, 3.0 * abs(nose), push if nose > 0.0 else push + 180.0, False)
-        finish("nose", before)
+        field, rect = _nose_field(face, nose, part_feather)
+        if _add_field(mesh, field, rect, weights, bx, by, bw, bh, freeze_src, freeze_feather, layer):
+            touched = True
     return touched
 
 def face_adjust(image, layer, source, eye, jaw, nose, box, freeze_mode="none", freeze_layer=None, freeze_feather=0.0,

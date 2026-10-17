@@ -946,7 +946,18 @@ inter = 254.4 - 145.6
 eyes_in = lambda x, y: _ell(145.6, 190, 0.26 * inter, 0.18 * inter)(x, y) or _ell(254.4, 190, 0.26 * inter, 0.18 * inter)(x, y)
 eyes_out = lambda x, y: _ell(145.6, 190, 0.26 * inter + fe + 2, 0.18 * inter + fe + 2)(x, y) or _ell(254.4, 190, 0.26 * inter + fe + 2, 0.18 * inter + fe + 2)(x, y)
 band = lambda x, y: eyes_out(x, y) and not eyes_in(x, y)
-nose_out = lambda x, y: _ell(200 - 29.12, 258 + 0.07 * inter, 20.16 + fe + 2, 0.13 * inter + fe + 2)(x, y) or _ell(200 + 29.12, 258 + 0.07 * inter, 20.16 + fe + 2, 0.13 * inter + fe + 2)(x, y)
+def _nose_part(f, pad=1.0):
+    it = abs(f["left_eye"][0] - f["right_eye"][0])
+    ang = math.atan2(f["left_eye"][1] - f["right_eye"][1], f["left_eye"][0] - f["right_eye"][0])
+    ux, uy = math.cos(ang), math.sin(ang)
+    nx, ny = f["nose"]
+    reach = [max(0.15 * it, min(0.45 * it, abs((f[k][0] - nx) * ux + (f[k][1] - ny) * uy))) for k in ("mouth_right", "mouth_left")]
+    b = 0.06 * f["box"][2] + pad
+    def inside(x, y):
+        u = (x - nx) * ux + (y - ny) * uy
+        v = -(x - nx) * uy + (y - ny) * ux
+        return abs(u) < reach[0 if u < 0.0 else 1] + b and -0.14 * it - b < v < 0.16 * it + b
+    return inside
 jaw_out = lambda x, y: _ell(110.4, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y) or _ell(289.6, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y)
 
 w, h, r0, r1 = _part_case()
@@ -980,7 +991,9 @@ if j_in < 20 or j_eye or j_nose or j_out:
     die("part: jaw moved eyes, nose or outside")
 w, h, r0, rn = _part_case(nose=15.0)
 n_in, _ = count_diff(r0, rn, w, h, 4, lambda x, y: abs(x - 200) <= 40 and abs(y - 262) <= 14)
-n_out, _ = count_diff(r0, rn, w, h, 4, lambda x, y: not nose_out(x, y))
+import json
+nose_out = _nose_part(json.load(open("/tmp/mesh-liquify-face-last.json", encoding="utf-8")))
+n_out, _ = count_diff(r0, rn, w, h, 4, lambda x, y: not nose_out(x + 0.5, y + 0.5))
 print("MESH_TEST part_nose inside=%d outside=%d" % (n_in, n_out), flush=True)
 if n_in < 300 or n_out:
     die("part: nose moved outside its area")
@@ -1011,18 +1024,12 @@ if os.path.isfile(photo):
         if pname.startswith("eye"):
             ells = [(f[k][0], f[k][1], 0.26 * it + pf, 0.18 * it + pf) for k in ("right_eye", "left_eye")]
         else:
-            ang = math.atan2(f["left_eye"][1] - f["right_eye"][1], f["left_eye"][0] - f["right_eye"][0])
-            ux, uy = math.cos(ang), math.sin(ang)
-            ells = []
-            for key, side in (("mouth_right", -1.0), ("mouth_left", 1.0)):
-                mx_, my_ = f[key]
-                dd = max(0.15 * it, min(0.45 * it, abs((mx_ - f["nose"][0]) * ux + (my_ - f["nose"][1]) * uy)))
-                ells.append((f["nose"][0] + side * 0.65 * dd * ux, f["nose"][1] + 0.07 * it + side * 0.65 * dd * uy, 0.45 * dd + pf, 0.13 * it + pf))
+            nose_in = _nose_part(f, 3.0)
         n_in = n_out = n_l = n_r = 0
         for i in range(0, len(p0), 4):
             if p0[i:i + 3] != p1[i:i + 3]:
                 px_, py_ = (i // 4) % pw + 0.5, (i // 4) // pw + 0.5
-                if any(((px_ - cx) / ax) ** 2 + ((py_ - cy) / ay) ** 2 <= 1.0 for cx, cy, ax, ay in ells):
+                if (nose_in(px_, py_) if pname.startswith("nose") else any(((px_ - cx) / ax) ** 2 + ((py_ - cy) / ay) ** 2 <= 1.0 for cx, cy, ax, ay in ells)):
                     n_in += 1
                     if px_ < f["nose"][0]:
                         n_l += 1

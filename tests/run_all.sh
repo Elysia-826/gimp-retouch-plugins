@@ -59,13 +59,24 @@ for p in $PLUGINS; do
     de_shine)
         smoke $p
         gc de_shine-photo "exec(open('tests/de_shine/test_deshine.py').read())" DESHINE_TEST_IMAGE=$FACE DESHINE_NECK=
-        check $p de_shine-photo "DESHINE_TEST ok" ;;
+        check $p de_shine-photo "DESHINE_TEST ok"
+        gc de_shine-strength "exec(open('tests/de_shine/test_strength.py').read())" DS_OUT=$L/ds; check $p de_shine-strength "DS_STRENGTH OK" ;;
     portrait_panel)
         smoke $p SMOKE_FACE=$FACE
         gc portrait_panel-help "exec(open('tests/portrait_panel/test_help.py').read(), {'__name__': 't'})"; check $p portrait_panel-help "HELP ALL OK"
+        for t in step3:ST3 eye:EYE review3:R3 workspace:PP_TEST; do
+            gc portrait_panel-${t%%:*} "exec(open('tests/portrait_panel/test_${t%%:*}.py').read(), {'__name__': 't'})"; check $p portrait_panel-${t%%:*} "^${t#*:} OK"
+        done
         if [ $GUI = 1 ]; then PP_TEST_IMAGE=$FACE sh tests/portrait_panel/gui_close_xvfb.sh :97 > "$L/portrait_panel-gui.log" 2>&1; check $p portrait_panel-gui "GUI CLOSE OK"
             bash tests/portrait_panel/gui_undo_xvfb.sh :95 "$FACE" > "$L/portrait_panel-gui-undo.log" 2>&1; check $p portrait_panel-gui-undo "GUI_PP OK"
         else NOTE[$p]="GUI skipped (missing:$NOGUI)"; fi ;;
+    fsep_oneclick)
+        smoke $p
+        gc fsep_oneclick-test "exec(open('fsep_oneclick/test_fsep.py').read())" FS_OUT=$L/fs; check $p fsep_oneclick-test "FSEP_TEST OK" ;;
+    dnb_setup)
+        smoke $p
+        gc dnb_setup-test "exec(open('dnb_setup/test_dnb.py').read())" DNB_OUT=$L/dnb; check $p dnb_setup-test "DNB_TEST OK"
+        gc dnb_setup-combined "exec(open('tests_combined.py').read())" T_OUT=$L/comb; check $p dnb_setup-combined "COMB_TEST OK" ;;
     *) smoke $p ;;
     esac
     case $p in batch_export|portrait_panel) ;; *)

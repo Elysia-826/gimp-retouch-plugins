@@ -171,7 +171,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Components subject_mask,ra
 
 脚本每次清空并重建 `/tmp/kd-gimp`，把 bundle.lock 里的插件装进去再测，不碰 `~/.config/GIMP`。测试图都在仓库里：合成图由脚本生成，带脸的照片是 `tests/data/astronaut.jpg`（NASA 公有领域照片，取自 scikit-image）。
 
-每个插件检查：装进去的文件齐全、在 pluginrc 里注册成功、跑一遍后图层/组/模式/不透明度对、日志里 0 条 CRITICAL。另外检查 `installer/bundle.py --check-catalog`。最后打印每个插件 pass / FAIL / skip，有一个 FAIL 就以非 0 退出。日志在 `/tmp/kd-gimp-logs/`。点修复需要 Resynthesizer，干净目录里没有时记为 skip；可用 `KD_EXTRA_PLUGINS="目录1 目录2"` 把它的插件目录一起放进去。
+每个插件检查：装进去的文件齐全、在 pluginrc 里注册成功、跑一遍后图层/组/模式/不透明度对、日志里 0 条 CRITICAL；错误输入（选中图层组、什么都没选）返回的状态和提示不变。各插件原有的测试也一起跑，每条都有阈值判断，不达标打印 FAIL。另外检查 `installer/bundle.py --check-catalog` 和代码规则 `tests/lint.py`（pyflakes；插件代码里不许直接写 undo_group_start、`except Exception: pass`、/home/box、/workspace、/tmp/ 路径，公用函数只能在 retouch_common.py 里定义）。最后打印每个插件 pass / FAIL / skip，有一个 FAIL 就以非 0 退出。日志在 `/tmp/kd-gimp-logs/`。点修复需要 Resynthesizer，干净目录里没有时记为 skip；可用 `KD_EXTRA_PLUGINS="目录1 目录2"` 把它的插件目录一起放进去。
 
 GitHub 上每次 push 和 pull request 会在 debian:trixie 容器里跑同一条命令（`.github/workflows/tests.yml`）。
 

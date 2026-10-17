@@ -7,6 +7,7 @@ from gi.repository import Gimp, Gegl, Gio
 Gegl.init(None)
 pdb = Gimp.get_pdb()
 SRC = os.environ.get("DESHINE_TEST_IMAGE", "/workspace/retouch-trial/before.jpg")
+NECK = [int(v) for v in os.environ.get("DESHINE_NECK", "500,2850,800,3150").split(",") if v]
 
 
 def die(m):
@@ -79,10 +80,12 @@ for mode in ("beginner", "pro", "flash"):
     print("DESHINE_TEST strong px %d mean luma drop %.2f" % (n, d / max(n, 1)), flush=True)
     if n == 0 or d / n < 3:
         die("highlights not reduced")
-    neck = max(mb[y * w + x] for y in range(2850, 3150, 5) for x in range(500, 800, 5))
-    print("DESHINE_TEST neck mask max %d" % neck, flush=True)
-    if neck != 0:
-        die("neck processed")
+    if NECK:
+        x0, y0, x1, y1 = NECK
+        neck = max(mb[y * w + x] for y in range(y0, y1, 5) for x in range(x0, x1, 5))
+        print("DESHINE_TEST neck mask max %d" % neck, flush=True)
+        if neck != 0:
+            die("neck processed")
     if mode == "pro":
         bl = img.get_layers()[0]
         if max(px(bl.get_mask(), "Y' u8")) != 0:

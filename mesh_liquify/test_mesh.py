@@ -1020,7 +1020,7 @@ if f_fr or f_rt < 20:
     die("part: user freeze did not win")
 
 # realistic photo, auto face: eye and nose move clearly inside, 0 outside
-photo = "/tmp/liq_gui_test.jpg"
+photo = os.environ.get("MESH_TEST_PHOTO", "/tmp/liq_gui_test.jpg")
 if os.path.isfile(photo):
     import json
     for pname, kw, need in (("eye+14", {"eye": 14.0}, 50000), ("nose-14", {"nose": -14.0}, 30000), ("nose+14", {"nose": 14.0}, 30000), ("jaw+20", {"jaw": 20.0}, 100000), ("jaw-20", {"jaw": -20.0}, 100000)):

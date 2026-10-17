@@ -158,6 +158,23 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Components subject_mask,ra
 | PhotoGIMP（可选） | commit eca3a8f | 同左 | github.com/Diolinux/PhotoGIMP | GPL-3.0 |
 | Chuck Henrich FS v3 / D&B v3 | 不包含（站点 TLS 握手失败，无法固定校验和），需手动安装 | 同左 | chuckhenrich.com | — |
 
+## 怎么跑测试
+
+需要：Debian 13 自带的 GIMP 3.0.4（要有 `gimp-console-3.0`）、`python3-opencv`、`python3-numpy`、`python3-pil`。想连界面测试一起跑，再装 `xvfb`、`xdotool`、`xfwm4`、`ripgrep`；没装就跳过界面测试，结果里会写明。
+
+在仓库根目录运行：
+
+```
+./run_tests                  # 全部插件
+./run_tests mesh_liquify     # 只测一个插件
+```
+
+脚本每次清空并重建 `/tmp/kd-gimp`，把 bundle.lock 里的插件装进去再测，不碰 `~/.config/GIMP`。测试图都在仓库里：合成图由脚本生成，带脸的照片是 `tests/data/astronaut.jpg`（NASA 公有领域照片，取自 scikit-image）。
+
+每个插件检查：装进去的文件齐全、在 pluginrc 里注册成功、跑一遍后图层/组/模式/不透明度对、日志里 0 条 CRITICAL。另外检查 `installer/bundle.py --check-catalog`。最后打印每个插件 pass / FAIL / skip，有一个 FAIL 就以非 0 退出。日志在 `/tmp/kd-gimp-logs/`。点修复需要 Resynthesizer，干净目录里没有时记为 skip；可用 `KD_EXTRA_PLUGINS="目录1 目录2"` 把它的插件目录一起放进去。
+
+GitHub 上每次 push 和 pull request 会在 debian:trixie 容器里跑同一条命令（`.github/workflows/tests.yml`）。
+
 ## 手动安装
 把插件文件夹复制到 GIMP 插件目录（文件夹名与 .py 同名，Linux 需 `chmod +x`），重启 GIMP：
 - Linux: `~/.config/GIMP/3.0/plug-ins/` 或 `~/.config/GIMP/3.2/plug-ins/`

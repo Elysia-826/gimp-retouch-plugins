@@ -2,7 +2,7 @@
 # GUI check on a private Xvfb display (GIMP3_DIRECTORY=/tmp/kd-gimp only):
 # 按脸调整 nose +14 and eye +7, then real Ctrl+Z and Ctrl+Y on the image window; count undo_group_end CRITICALs.
 D=${1:-:94}; IMG=${2:-/tmp/liq_gui_test.jpg}
-export GIMP3_DIRECTORY=/tmp/kd-gimp; LOG=/tmp/kd_gui_face.log
+export GIMP3_DIRECTORY=${GIMP3_DIRECTORY:-/tmp/kd-gimp}; LOG=/tmp/kd_gui_face.log
 grep -q "color-profile-policy keep" $GIMP3_DIRECTORY/gimprc || echo "(color-profile-policy keep)" >> $GIMP3_DIRECTORY/gimprc
 grep -q "show-welcome-dialog no" $GIMP3_DIRECTORY/gimprc || echo "(show-welcome-dialog no)" >> $GIMP3_DIRECTORY/gimprc
 Xvfb $D -screen 0 1600x1000x24 >/dev/null 2>&1 & XP=$!

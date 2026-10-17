@@ -1,0 +1,24 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  gimp:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 60
+    steps:
+      - name: Install GIMP 3.0.4 and test tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gimp gir1.2-rsvg-2.0 python3-gi python3-gi-cairo gir1.2-gexiv2-0.10 \
+            python3-opencv python3-numpy python3-pil xvfb xdotool xfwm4 ripgrep procps ca-certificates git
+          gimp-console-3.0 --version | grep -q "version 3.0.4" || { gimp-console-3.0 --version; echo "need GIMP 3.0.4"; exit 1; }
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: ./run_tests
+      - name: Keep logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: /tmp/kd-gimp-logs

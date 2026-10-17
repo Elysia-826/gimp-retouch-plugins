@@ -902,4 +902,93 @@ if sud != 0:
     die("undo did not restore the selfie")
 imgs.delete()
 
+# only this part: eye/jaw/nose move only inside their own area plus a soft edge
+def _ramp(buf, w, h, bpp):
+    for y in range(h):
+        for x in range(w):
+            i = (y * w + x) * bpp
+            buf[i:i + 4] = bytes([(x * 3) & 255, (y * 3) & 255, ((x + y) * 5) & 255, 255])
+
+def _ell(cx, cy, ax, ay):
+    return lambda x, y: ((x + 0.5 - cx) / ax) ** 2 + ((y + 0.5 - cy) / ay) ** 2 <= 1.0
+
+def _part_case(**kw):
+    img, lay, (w, h, r0) = new_image(400, 480, Gimp.ImageBaseType.RGB, Gimp.ImageType.RGBA_IMAGE, "R'G'B'A u8", 4, _ramp)
+    Gimp.Selection.none(img)
+    args = {"source": "box", "box-x": 40.0, "box-y": 30.0, "box-width": 320.0, "box-height": 400.0,
+            "freeze": "none", "freeze-feather": 0.0, "eye": 0.0, "jaw": 0.0, "nose": 0.0}
+    fl = kw.pop("freeze_rect", None)
+    if fl is not None:
+        fr = Gimp.Layer.new(img, "冻结", w, h, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL)
+        img.insert_layer(fr, None, 0)
+        fr.get_buffer().set(Gegl.Rectangle.new(0, 0, w, h), "R'G'B'A u8", bytes([0, 0, 0, 255]) * (w * h))
+        x0, y0, x1, y1 = fl
+        fr.get_buffer().set(Gegl.Rectangle.new(x0, y0, x1 - x0, y1 - y0), "R'G'B'A u8", bytes([255, 255, 255, 255]) * ((x1 - x0) * (y1 - y0)))
+        fr.update(0, 0, w, h)
+        args.update({"freeze": "layer", "freeze-layer": fr, "freeze-feather": 4.0})
+    args.update(kw)
+    call_named("python-fu-mesh-liquify-face", img, lay, **args)
+    _, _, r1 = pixels(lay, "R'G'B'A u8")
+    img.delete()
+    return w, h, r0, r1
+
+def _absdiff(a, b, w, h, pred):
+    acc = 0
+    for y in range(h):
+        for x in range(w):
+            if pred(x, y):
+                i = (y * w + x) * 4
+                acc += abs(a[i] - b[i]) + abs(a[i + 1] - b[i + 1]) + abs(a[i + 2] - b[i + 2])
+    return acc
+
+fe = 0.06 * 320
+inter = 254.4 - 145.6
+eyes_in = lambda x, y: _ell(145.6, 190, 0.12 * inter, 0.08 * inter)(x, y) or _ell(254.4, 190, 0.12 * inter, 0.08 * inter)(x, y)
+eyes_out = lambda x, y: _ell(145.6, 190, 0.12 * inter + fe + 2, 0.08 * inter + fe + 2)(x, y) or _ell(254.4, 190, 0.12 * inter + fe + 2, 0.08 * inter + fe + 2)(x, y)
+band = lambda x, y: eyes_out(x, y) and not eyes_in(x, y)
+nose_out = _ell(200, 258, 0.14 * inter + fe + 2, 0.06 * inter + fe + 2)
+jaw_out = lambda x, y: _ell(110.4, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y) or _ell(289.6, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y)
+
+w, h, r0, r1 = _part_case()
+pz, _ = count_diff(r0, r1, w, h, 4, lambda x, y: True)
+w, h, r0, re = _part_case(eye=15.0)
+e_in, _ = count_diff(r0, re, w, h, 4, eyes_in)
+e_out, _ = count_diff(r0, re, w, h, 4, lambda x, y: not eyes_out(x, y))
+cheek, _ = count_diff(r0, re, w, h, 4, lambda x, y: 90 <= x < 130 and 250 <= y < 300)
+fore, _ = count_diff(r0, re, w, h, 4, lambda x, y: 140 <= x < 260 and 50 <= y < 120)
+jawz, _ = count_diff(r0, re, w, h, 4, lambda x, y: 60 <= x < 160 and 330 <= y < 400)
+w, h, r0, ro = _part_case(eye=15.0, **{"part-only": False})
+b_on = _absdiff(r0, re, w, h, band)
+b_off = _absdiff(r0, ro, w, h, band)
+off_out, _ = count_diff(r0, ro, w, h, 4, lambda x, y: not eyes_out(x, y))
+print("MESH_TEST part_zero diff=%d" % pz, flush=True)
+print("MESH_TEST part_eye inside=%d outside=%d cheek=%d forehead=%d jaw=%d band_on=%d band_off=%d off_outside=%d" % (
+    e_in, e_out, cheek, fore, jawz, b_on, b_off, off_out), flush=True)
+if pz != 0:
+    die("part: slider 0 changed pixels")
+if e_in < 5 or e_out != 0 or cheek or fore or jawz:
+    die("part: eye moved outside its area")
+if not (0 < b_on < b_off):
+    die("part: eye feather band is not partial")
+w, h, r0, rj = _part_case(jaw=20.0)
+j_in, _ = count_diff(r0, rj, w, h, 4, lambda x, y: abs(x - 110) <= 30 and abs(y - 357) <= 30)
+j_eye, _ = count_diff(r0, rj, w, h, 4, eyes_out)
+j_nose, _ = count_diff(r0, rj, w, h, 4, lambda x, y: abs(x - 200) <= 20 and abs(y - 258) <= 12)
+j_out, _ = count_diff(r0, rj, w, h, 4, lambda x, y: not jaw_out(x, y))
+print("MESH_TEST part_jaw inside=%d eyes=%d nose=%d outside=%d" % (j_in, j_eye, j_nose, j_out), flush=True)
+if j_in < 20 or j_eye or j_nose or j_out:
+    die("part: jaw moved eyes, nose or outside")
+w, h, r0, rn = _part_case(nose=15.0)
+n_in, _ = count_diff(r0, rn, w, h, 4, lambda x, y: abs(x - 200) <= 25 and abs(y - 258) <= 10)
+n_out, _ = count_diff(r0, rn, w, h, 4, lambda x, y: not nose_out(x, y))
+print("MESH_TEST part_nose inside=%d outside=%d" % (n_in, n_out), flush=True)
+if n_in < 10 or n_out:
+    die("part: nose moved outside its area")
+w, h, r0, rf = _part_case(jaw=20.0, freeze_rect=(0, 300, 150, 480))
+f_fr, _ = count_diff(r0, rf, w, h, 4, lambda x, y: x < 150 and y >= 300)
+f_rt, _ = count_diff(r0, rf, w, h, 4, lambda x, y: abs(x - 290) <= 30 and abs(y - 357) <= 30)
+print("MESH_TEST part_user_freeze frozen=%d right_jaw=%d" % (f_fr, f_rt), flush=True)
+if f_fr or f_rt < 20:
+    die("part: user freeze did not win")
+
 print("MESH_TEST OK", flush=True)

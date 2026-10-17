@@ -1231,8 +1231,56 @@ def _edit_limits(image, layer, freeze_mode, freeze_layer):
         freeze_src = freeze_layer
     return weights, bx, by, bw, bh, freeze_src
 
-def _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample):
+def _ellipse_weight(cx, cy, ax, ay, fe):
+    def w(x, y):
+        dx, dy = x - cx, y - cy
+        d = math.sqrt((dx / ax) ** 2 + (dy / ay) ** 2)
+        if d <= 1.0:
+            return 1.0
+        de = math.sqrt((dx / (ax + fe)) ** 2 + (dy / (ay + fe)) ** 2)
+        if de >= 1.0:
+            return 0.0
+        k = de / d
+        return _smoother((1.0 - de) / max(1e-6, 1.0 - k))
+    return w
+
+def _part_regions(face, feather):
+    inter = abs(face["left_eye"][0] - face["right_eye"][0])
+    fw = face["box"][2]
+    fe = float(feather) if feather > 0.0 else max(4.0, 0.06 * fw)
+    eyes = [_ellipse_weight(face[k][0], face[k][1], 0.12 * inter, 0.08 * inter, fe) for k in ("right_eye", "left_eye")]
+    nx, ny = face["nose"]
+    nose = [_ellipse_weight(nx, ny, 0.14 * inter, 0.06 * inter, fe)]
+    left, right = _jaw_ends(face)
+    jaw = [_ellipse_weight(p[0], p[1], 0.12 * fw, 0.12 * fw, fe) for p in (left, right)]
+    def union(ws):
+        return lambda x, y: max(f(x, y) for f in ws)
+    return {"eye": union(eyes), "nose": union(nose), "jaw": union(jaw)}
+
+def _limit_to_part(mesh, before, weight):
+    bx0, by0, bbw, bbh, ba = before
+    a = mesh.a
+    for y in range(mesh.y, mesh.y + mesh.bh):
+        for x in range(mesh.x, mesh.x + mesh.bw):
+            i = ((y - mesh.y) * mesh.bw + (x - mesh.x)) * 2
+            if bx0 <= x < bx0 + bbw and by0 <= y < by0 + bbh:
+                j = ((y - by0) * bbw + (x - bx0)) * 2
+                ox, oy = ba[j], ba[j + 1]
+            else:
+                ox = oy = 0.0
+            nx, ny = a[i], a[i + 1]
+            if nx == ox and ny == oy:
+                continue
+            if nx == 0.0 and ny == 0.0:
+                continue
+            k = weight(x + 0.5, y + 0.5)
+            a[i] = ox + (nx - ox) * k
+            a[i + 1] = oy + (ny - oy) * k
+
+def _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample,
+                     part_only=True, part_feather=0.0):
     touched = False
+    regions = _part_regions(face, part_feather) if part_only else None
     def dab(mode, x, y, radius, strength, angle=0.0):
         nonlocal touched
         if strength <= 0.0 or radius < 1.0:
@@ -1240,24 +1288,33 @@ def _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze
         if deform(mesh, mode, x, y, -1.0, -1.0, radius, strength, 0.0, angle, True,
                   weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample, None, False):
             touched = True
+    def start():
+        return (mesh.x, mesh.y, mesh.bw, mesh.bh, array.array("f", mesh.a))
+    def finish(name, before):
+        if regions is not None and mesh.bw:
+            _limit_to_part(mesh, before, regions[name])
     inter = abs(face["left_eye"][0] - face["right_eye"][0])
     eye_r = max(8.0, 0.16 * inter)
     if abs(eye) >= 0.05:
+        before = start()
         mode = "bloat" if eye > 0.0 else "pinch"
         for key in ("right_eye", "left_eye"):
             dab(mode, face[key][0], face[key][1], eye_r, abs(eye))
+        finish("eye", before)
     if abs(jaw) >= 0.05:
+        before = start()
         left, right = _jaw_ends(face)
         box_w = face["box"][2]
         jaw_r = max(14.0, 0.18 * box_w)
-        # Positive narrows: image-left jaw pushes right, image-right jaw pushes left.
         if jaw > 0.0:
             a_left, a_right = 0.0, 180.0
         else:
             a_left, a_right = 180.0, 0.0
         dab("push", left[0], left[1], jaw_r, abs(jaw), a_left)
         dab("push", right[0], right[1], jaw_r, abs(jaw), a_right)
+        finish("jaw", before)
     if abs(nose) >= 0.05:
+        before = start()
         nx, ny = face["nose"]
         half = max(4.0, 0.12 * inter)
         nose_r = max(8.0, 0.10 * inter)
@@ -1267,9 +1324,11 @@ def _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze
             a_left, a_right = 180.0, 0.0
         dab("push", nx - half, ny, nose_r, abs(nose), a_left)
         dab("push", nx + half, ny, nose_r, abs(nose), a_right)
+        finish("nose", before)
     return touched
 
-def face_adjust(image, layer, source, eye, jaw, nose, box, freeze_mode="none", freeze_layer=None, freeze_feather=0.0):
+def face_adjust(image, layer, source, eye, jaw, nose, box, freeze_mode="none", freeze_layer=None, freeze_feather=0.0,
+                part_only=True, part_feather=0.0):
     if layer.is_group() or _pstr(layer, ROLE) == "original":
         raise RuntimeError("Choose a normal paint layer, not the hidden liquify snapshot or a group / 请选择普通图层")
     if layer.get_lock_content():
@@ -1301,7 +1360,8 @@ def face_adjust(image, layer, source, eye, jaw, nose, box, freeze_mode="none", f
     mesh = _load_mesh(layer, w, h) if orig is not None else Mesh(w, h)
     sample = orig if orig is not None else layer
     before_blob = _mesh_blob(mesh)
-    touched = _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample)
+    touched = _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample,
+                               part_only, part_feather)
     if not touched:
         return
     image.undo_group_start()
@@ -1331,7 +1391,7 @@ def run_face(procedure, run_mode, image, drawables, config, data):
         GimpUi.init(PROC_FACE)
         dlg = GimpUi.ProcedureDialog.new(procedure, config, "按脸调整 / Face Adjust")
         dlg.fill(["source", "eye", "jaw", "nose", "box-x", "box-y", "box-width", "box-height",
-                  "freeze", "freeze-layer", "freeze-feather"])
+                  "part-only", "part-feather", "freeze", "freeze-layer", "freeze-feather"])
         ok = dlg.run()
         dlg.destroy()
         if not ok:
@@ -1345,7 +1405,8 @@ def run_face(procedure, run_mode, image, drawables, config, data):
                     config.get_property("eye"), config.get_property("jaw"), config.get_property("nose"),
                     (config.get_property("box-x"), config.get_property("box-y"),
                      config.get_property("box-width"), config.get_property("box-height")),
-                    fr_mode, config.get_property("freeze-layer"), config.get_property("freeze-feather"))
+                    fr_mode, config.get_property("freeze-layer"), config.get_property("freeze-feather"),
+                    config.get_property("part-only"), config.get_property("part-feather"))
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
@@ -1497,6 +1558,11 @@ class MeshLiquify(Gimp.PlugIn):
         p.add_double_argument("box-y", "Manual box Y / 手动画框上", "Layer pixels. Used only for manual box.", -100000.0, 1000000.0, 0.0, F)
         p.add_double_argument("box-width", "Manual box width / 手动画框宽", "At least 20. Ignored when detecting.", 0.0, 1000000.0, 0.0, F)
         p.add_double_argument("box-height", "Manual box height / 手动画框高", "At least 20. Ignored when detecting.", 0.0, 1000000.0, 0.0, F)
+        p.add_boolean_argument("part-only", "只动这个部位 / Only this part",
+                               "On: eyes, jaw and nose each move only inside their own area, with a soft edge; outside stays still. 打开时只动对应部位，边缘软过渡，外面不动。",
+                               True, F)
+        p.add_double_argument("part-feather", "部位边缘过渡 px / Part edge softness (0=自动)",
+                              "0 = about 6% of the face width. 0 为自动，约脸宽的 6%。", 0.0, 400.0, 0.0, F)
         fr = Gimp.Choice.new()
         fr.add("none", 0, "No freeze / 不冻结", "")
         fr.add("layer", 1, "Freeze layer / 用冻结图层", "White pixels stay put. The layer is hidden after use.")

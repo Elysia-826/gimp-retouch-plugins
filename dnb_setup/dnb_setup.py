@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # 一键加深减淡搭建 / One-click Dodge & Burn setup  (GIMP 3.0.x and 3.2.x)
-import os, sys, gi
+import sys, gi
 gi.require_version('Gimp', '3.0')
 gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')

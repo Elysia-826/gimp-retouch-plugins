@@ -19,7 +19,7 @@ gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gegl", "0.4")
-from gi.repository import Gimp, GimpUi, GObject, GLib, Gtk, Gdk, Gegl
+from gi.repository import Gimp, GimpUi, GLib, Gtk, Gdk, Gegl
 
 from retouch_common import new_group, set_drawables, undo_group
 

@@ -173,7 +173,6 @@ def _restore_thin(layer, plan):
     buf = layer.get_buffer()
     now = bytearray(_bytes(buf.get(plan["rect"], 1.0, plan["fmt"], Gegl.AbyssPolicy.NONE)))
     bpp = plan["bpp"]
-    bw = plan["bw"]
     raw = plan["raw"]
     thin = plan["thin"]
     if len(now) != len(raw):

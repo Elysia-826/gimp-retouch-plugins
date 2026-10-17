@@ -19,5 +19,14 @@ for f in files + sorted(shipped - set(files)):
             if applies(f) and re.search(pat, line):
                 print("LINT %s:%d %s (%s)" % (f, n, line.strip(), why))
                 bad += 1
+checked = ["retouch_common.py"] + files
+try:
+    import pyflakes  # noqa: F401
+    r = subprocess.run([sys.executable, "-m", "pyflakes"] + checked, cwd=repo, capture_output=True, text=True)
+    for line in (r.stdout + r.stderr).splitlines():
+        print("LINT pyflakes " + line)
+    bad += r.returncode != 0
+except ImportError:
+    print("LINT pyflakes not installed (apt install python3-pyflakes), skipped")
 print("LINT %s (%d files)" % ("OK" if not bad else "FAIL", len(files)))
 sys.exit(1 if bad else 0)

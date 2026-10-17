@@ -5,7 +5,6 @@
 # changed, fine texture is copied from the photo). OUT.pgm = soft shine mask.
 # Prints one JSON object on stdout.
 import json
-import os
 import sys
 
 import numpy as np

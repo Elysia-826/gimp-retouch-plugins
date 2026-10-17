@@ -2,7 +2,7 @@
 # Every procedure argument can be set with env BE_<NAME> (dashes -> underscores, upper case),
 # e.g. BE_INPUT_FOLDER, BE_OUTPUT_FOLDER, BE_FORMATS=jpeg,webp, BE_LONG_SIDE=2048, BE_OVERWRITE=1.
 # Prints "BATCH_EXPORT_STATUS=<success|execution-error|...>" and exits GIMP with code 0/1.
-import os, sys
+import os
 from gi.repository import Gimp, Gio, GObject
 pdb = Gimp.get_pdb()
 proc = pdb.lookup_procedure("python-fu-batch-export")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # 批量导出 / Batch Export  (GIMP 3.0.x and 3.2.x)
-import os, sys, time, traceback, gi
+import os, sys, time, gi
 gi.require_version('Gimp', '3.0')
 gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')

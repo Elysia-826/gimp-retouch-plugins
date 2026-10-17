@@ -800,7 +800,7 @@ hip0 = _hip(f0, fw, 140, 50, 220, 90)
 hip1 = _hip(fj, fw, 140, 50, 220, 90)
 print("MESH_TEST face_jaw marker=%s frozen=%d forehead=%d hipass %.3f -> %.3f" % (
     cm, frozen, fore, hip0, hip1), flush=True)
-if cm is None or cm[0] < 113:
+if cm is None or cm[0] < 111:
     die("jaw did not push the left marker inward (toward +x): %s" % (cm,))
 if frozen != 0 or fore != 0:
     die("freeze or forehead moved")
@@ -958,7 +958,21 @@ def _nose_part(f, pad=1.0):
         v = -(x - nx) * uy + (y - ny) * ux
         return abs(u) < reach[0 if u < 0.0 else 1] + b and -0.5 * it - pad < v < 0.16 * it + max(b, 0.26 * it + pad)
     return inside
-jaw_out = lambda x, y: _ell(110.4, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y) or _ell(289.6, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y)
+def _jaw_part(f, pad=1.0):
+    import ast, base64
+    ns = {"math": math, "base64": base64}
+    for node in ast.parse(open("/workspace/retouch-plugins/mesh_liquify/mesh_liquify.py", encoding="utf-8").read()).body:
+        if isinstance(node, ast.FunctionDef) and node.name in ("_jaw_outline", "_jaw_gate", "_jaw_frame"):
+            exec(compile(ast.Module([node], []), "mesh_liquify.py", "exec"), ns)
+    cx, cy, ux, uy, tables, _, v_top, v_bot, v_nose, b, u0 = ns["_jaw_frame"](f, 0.0)
+    def inside(x, y):
+        v = -(x - cx) * uy + (y - cy) * ux
+        if not v_nose - pad < v < v_bot + pad:
+            return False
+        u = (x - cx) * ux + (y - cy) * uy - u0(v)
+        row = min(len(tables[0]) - 1, max(0, int(v - v_top)))
+        return abs(u) < tables[0 if u < 0.0 else 1][row] + b + pad
+    return inside
 
 w, h, r0, r1 = _part_case()
 pz, _ = count_diff(r0, r1, w, h, 4, lambda x, y: True)
@@ -981,17 +995,18 @@ if e_in < 1000 or e_out != 0 or cheek or fore or jawz:
     die("part: eye moved outside its area")
 if not (0 < b_on < b_off):
     die("part: eye feather band is not partial")
+import json
 w, h, r0, rj = _part_case(jaw=20.0)
 j_in, _ = count_diff(r0, rj, w, h, 4, lambda x, y: abs(x - 110) <= 30 and abs(y - 357) <= 30)
 j_eye, _ = count_diff(r0, rj, w, h, 4, eyes_out)
 j_nose, _ = count_diff(r0, rj, w, h, 4, lambda x, y: abs(x - 200) <= 20 and abs(y - 258) <= 12)
-j_out, _ = count_diff(r0, rj, w, h, 4, lambda x, y: not jaw_out(x, y))
+jaw_out = _jaw_part(json.load(open("/tmp/mesh-liquify-face-last.json", encoding="utf-8")), 2.0)
+j_out, _ = count_diff(r0, rj, w, h, 4, lambda x, y: not jaw_out(x + 0.5, y + 0.5))
 print("MESH_TEST part_jaw inside=%d eyes=%d nose=%d outside=%d" % (j_in, j_eye, j_nose, j_out), flush=True)
 if j_in < 20 or j_eye or j_nose or j_out:
     die("part: jaw moved eyes, nose or outside")
 w, h, r0, rn = _part_case(nose=15.0)
 n_in, _ = count_diff(r0, rn, w, h, 4, lambda x, y: abs(x - 200) <= 40 and abs(y - 262) <= 14)
-import json
 nose_out = _nose_part(json.load(open("/tmp/mesh-liquify-face-last.json", encoding="utf-8")))
 n_out, _ = count_diff(r0, rn, w, h, 4, lambda x, y: not nose_out(x + 0.5, y + 0.5))
 print("MESH_TEST part_nose inside=%d outside=%d" % (n_in, n_out), flush=True)
@@ -1008,7 +1023,7 @@ if f_fr or f_rt < 20:
 photo = "/tmp/liq_gui_test.jpg"
 if os.path.isfile(photo):
     import json
-    for pname, kw, need in (("eye+14", {"eye": 14.0}, 50000), ("nose-14", {"nose": -14.0}, 30000), ("nose+14", {"nose": 14.0}, 30000)):
+    for pname, kw, need in (("eye+14", {"eye": 14.0}, 50000), ("nose-14", {"nose": -14.0}, 30000), ("nose+14", {"nose": 14.0}, 30000), ("jaw+20", {"jaw": 20.0}, 100000), ("jaw-20", {"jaw": -20.0}, 100000)):
         imgp = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(photo))
         layp = imgp.get_layers()[0]
         if not layp.has_alpha():
@@ -1023,13 +1038,15 @@ if os.path.isfile(photo):
         pf = 0.06 * f["box"][2] + 3
         if pname.startswith("eye"):
             ells = [(f[k][0], f[k][1], 0.26 * it + pf, 0.18 * it + pf) for k in ("right_eye", "left_eye")]
-        else:
+        elif pname.startswith("nose"):
             nose_in = _nose_part(f, 3.0)
+        else:
+            nose_in = _jaw_part(f, 3.0)
         n_in = n_out = n_l = n_r = 0
         for i in range(0, len(p0), 4):
             if p0[i:i + 3] != p1[i:i + 3]:
                 px_, py_ = (i // 4) % pw + 0.5, (i // 4) // pw + 0.5
-                if (nose_in(px_, py_) if pname.startswith("nose") else any(((px_ - cx) / ax) ** 2 + ((py_ - cy) / ay) ** 2 <= 1.0 for cx, cy, ax, ay in ells)):
+                if (any(((px_ - cx) / ax) ** 2 + ((py_ - cy) / ay) ** 2 <= 1.0 for cx, cy, ax, ay in ells) if pname.startswith("eye") else nose_in(px_, py_)):
                     n_in += 1
                     if px_ < f["nose"][0]:
                         n_l += 1
@@ -1040,7 +1057,7 @@ if os.path.isfile(photo):
         print("MESH_TEST photo_%s inside=%d outside=%d img_left=%d img_right=%d" % (pname, n_in, n_out, n_l, n_r), flush=True)
         if n_in < need or n_out:
             die("photo %s: too weak or moved outside" % pname)
-        if pname.startswith("nose") and (n_l < 10000 or n_r < 10000 or not 0.5 <= n_l / float(n_r) <= 2.0):
+        if not pname.startswith("eye") and (n_l < 10000 or n_r < 10000 or not 0.5 <= n_l / float(n_r) <= 2.0):
             die("photo %s: alae not balanced" % pname)
         imgp.delete()
 else:

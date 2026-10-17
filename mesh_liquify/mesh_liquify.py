@@ -1076,6 +1076,7 @@ def _dump_face(face, eye, jaw, nose):
             "mouth_right": list(face["mouth_right"]),
             "mouth_left": list(face["mouth_left"]),
             "jaw": [list(p) for p in _jaw_ends(face)],
+            "jaw_contour": _jaw_outline(face),
             "eye": eye, "jaw_slider": jaw, "nose_slider": nose,
         }
         with open(os.path.join("/tmp" if os.name != "nt" else tempfile.gettempdir(), "mesh-liquify-face-last.json"), "w", encoding="utf-8") as f:
@@ -1220,6 +1221,8 @@ def _detect_face(layer):
         "nose": tuple(info["nose"]),
         "mouth_right": tuple(info["mouth_right"]),
         "mouth_left": tuple(info["mouth_left"]),
+        "jaw_contour": info.get("jaw_contour"),
+        "jaw_gate": info.get("jaw_gate"),
         "score": info.get("score"),
         "manual": False,
     }
@@ -1302,6 +1305,132 @@ def _nose_field(face, nose, feather):
     xs = [q[0] for q in pts]; ys = [q[1] for q in pts]
     return field, (int(math.floor(min(xs))) - 1, int(math.floor(min(ys))) - 1, int(math.ceil(max(xs))) + 2, int(math.ceil(max(ys))) + 2)
 
+def _jaw_outline(face):
+    pts = face.get("jaw_contour")
+    if pts and len(pts) >= 20:
+        return [list(p) for p in pts]
+    ang = math.atan2(face["left_eye"][1] - face["right_eye"][1], face["left_eye"][0] - face["right_eye"][0])
+    ux, uy = math.cos(ang), math.sin(ang)
+    cx = (face["mouth_left"][0] + face["mouth_right"][0]) * 0.5
+    cy = (face["mouth_left"][1] + face["mouth_right"][1]) * 0.5
+    bx, by, bw, bh = face["box"]
+    us = [(px - cx) * ux + (py - cy) * uy for px, py in ((bx, by), (bx + bw, by), (bx, by + bh), (bx + bw, by + bh))]
+    vs = [-(px - cx) * uy + (py - cy) * ux for px, py in ((bx, by), (bx + bw, by), (bx, by + bh), (bx + bw, by + bh))]
+    ar, al, bv = max(max(us), 1.0), max(-min(us), 1.0), max(max(vs), 1.0)
+    out = []
+    for deg in range(-20, 201, 2):
+        c, sn = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+        r = 0.95 / math.sqrt((c / (ar if c >= 0.0 else al)) ** 2 + (max(sn, 0.0) / bv) ** 2)
+        du, dv = r * c, r * sn
+        out.append([cx + du * ux - dv * uy, cy + du * uy + dv * ux])
+    return out
+
+def _jaw_gate(face):
+    g = face.get("jaw_gate")
+    if not g:
+        return None
+    import zlib
+    gdat = zlib.decompress(base64.b64decode(g["data"]))
+    gs, gx, gy, gw, gh = float(g["scale"]), int(g["x"]), int(g["y"]), int(g["w"]), int(g["h"])
+    def gate(x, y):
+        qx, qy = int(x * gs) - gx, int(y * gs) - gy
+        if 0 <= qx < gw and 0 <= qy < gh:
+            return gdat[qy * gw + qx] / 255.0
+        return 1.0
+    return gate
+
+def _jaw_frame(face, feather):
+    ang = math.atan2(face["left_eye"][1] - face["right_eye"][1], face["left_eye"][0] - face["right_eye"][0])
+    ux, uy = math.cos(ang), math.sin(ang)
+    cx = (face["mouth_left"][0] + face["mouth_right"][0]) * 0.5
+    cy = (face["mouth_left"][1] + face["mouth_right"][1]) * 0.5
+    band = float(feather) if feather > 0.0 else max(4.0, 0.06 * face["box"][2])
+    outline = _jaw_outline(face)
+    gate = _jaw_gate(face)
+    fac = [1.0] * len(outline)
+    if gate is not None:
+        fac = [gate(px, py) for px, py in outline]
+        step = sum(math.hypot(outline[i + 1][0] - outline[i][0], outline[i + 1][1] - outline[i][1]) for i in range(len(outline) - 1)) / max(1, len(outline) - 1)
+        er = max(1, int(round(0.5 * band / max(1.0, step))))
+        fac = [min(fac[max(0, i - er):i + er + 1]) for i in range(len(fac))]
+        fac = [min(a, b) for a, b in zip(fac, fac[::-1])]
+        sig = max(1.0, 0.5 * band / max(1.0, step))
+        ker = [math.exp(-0.5 * (j / sig) ** 2) for j in range(-int(3 * sig), int(3 * sig) + 1)]
+        fac = [sum(ker[j] * fac[min(len(fac) - 1, max(0, i + j - int(3 * sig)))] for j in range(len(ker))) / sum(ker) for i in range(len(fac))]
+    pts = [((px - cx) * ux + (py - cy) * uy, -(px - cx) * uy + (py - cy) * ux, fac[i]) for i, (px, py) in enumerate(outline)]
+    mid = max(range(len(pts)), key=lambda i: pts[i][1])
+    v_bot = pts[mid][1]
+    u_bot = pts[mid][0]
+    def u0(v):
+        t = min(1.0, max(0.0, v / v_bot))
+        return u_bot * t * t * (3.0 - 2.0 * t)
+    pts = [(u - u0(v), v, fc) for u, v, fc in pts]
+    v_nose = min(-1.0, -(face["nose"][0] - cx) * uy + (face["nose"][1] - cy) * ux)
+    v_top = min(v_nose, min(p[1] for p in pts))
+    n = int(math.ceil(v_bot - v_top)) + 1
+    tables, facs = [], []
+    for side in (pts[mid:], pts[mid::-1]):
+        prof = []
+        vmin = v_bot
+        for u, v, fc in side:
+            vmin = min(vmin, v)
+            prof.append((vmin, abs(u), fc))
+        prof.reverse()
+        hw, fs = [], []
+        j = 0
+        for k in range(n):
+            v = v_top + k
+            while j + 1 < len(prof) and prof[j + 1][0] <= v:
+                j += 1
+            if v <= prof[0][0]:
+                hw.append(prof[0][1]); fs.append(prof[0][2])
+            elif j + 1 >= len(prof):
+                hw.append(prof[-1][1] if v <= v_bot else 0.0); fs.append(prof[-1][2])
+            else:
+                (va, ha, fa), (vb, hb, fb) = prof[j], prof[j + 1]
+                q = (v - va) / (vb - va) if vb > va else 0.0
+                hw.append(ha + (hb - ha) * q); fs.append(fa + (fb - fa) * q)
+        tables.append(hw); facs.append(fs)
+    half = max(1, int(band))
+    def box(col):
+        acc = [0.0]
+        for h in col:
+            acc.append(acc[-1] + h)
+        return [(acc[min(n, i + half + 1)] - acc[max(0, i - half)]) / (min(n, i + half + 1) - max(0, i - half)) for i in range(n)]
+    return cx, cy, ux, uy, [box(t) for t in tables], [box(t) for t in facs], v_top, v_bot, v_nose, band, u0
+
+def _jaw_field(face, jaw, feather):
+    cx, cy, ux, uy, tables, fac, v_top, v_bot, v_nose, band, u0 = _jaw_frame(face, feather)
+    k = 0.00175 * jaw
+    hmax = max(max(t) for t in tables)
+    gate = _jaw_gate(face)
+    def field(x, y):
+        dx, dy = x - cx, y - cy
+        v = -dx * uy + dy * ux
+        if v <= v_nose or v >= v_bot:
+            return 0.0, 0.0
+        u = dx * ux + dy * uy - u0(v)
+        row = int(v - v_top)
+        hw = tables[0 if u < 0.0 else 1][row]
+        if hw <= 1.0:
+            return 0.0, 0.0
+        t = min(1.0, (v - v_nose) / -v_nose)
+        amount = k * math.sqrt(hw * hmax) * fac[0 if u < 0.0 else 1][row] * t * t * (3.0 - 2.0 * t)
+        au = abs(u)
+        if au <= hw:
+            q = (au / hw - 0.45) / 0.4
+            w = 0.0 if q <= 0.0 else (1.0 if q >= 1.0 else q * q * (3.0 - 2.0 * q))
+        else:
+            w = (1.0 - _smoother((au - hw) / band)) * (1.0 if gate is None else gate(x, y))
+        if w <= 0.0:
+            return 0.0, 0.0
+        m = (-amount if u > 0.0 else amount) * w
+        return m * ux, m * uy
+    wide = max(max(t) for t in tables) + band
+    pts = [(cx + su * wide * ux - sv * uy, cy + su * wide * uy + sv * ux) for su in (-1.0, 1.0) for sv in (v_nose, v_bot)]
+    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+    return field, (int(math.floor(min(xs))) - 1, int(math.floor(min(ys))) - 1, int(math.ceil(max(xs))) + 2, int(math.ceil(max(ys))) + 2)
+
 def _add_field(mesh, field, rect, weights, wx, wy, ww, wh, freeze_src, freeze_feather, layer):
     x0, y0, x1, y1 = rect
     if weights is not None:
@@ -1341,11 +1470,9 @@ def _part_regions(face, feather):
     fw = face["box"][2]
     fe = float(feather) if feather > 0.0 else max(4.0, 0.06 * fw)
     eyes = [_ellipse_weight(face[k][0], face[k][1], 0.26 * inter, 0.18 * inter, fe) for k in ("right_eye", "left_eye")]
-    left, right = _jaw_ends(face)
-    jaw = [_ellipse_weight(p[0], p[1], 0.12 * fw, 0.12 * fw, fe) for p in (left, right)]
     def union(ws):
         return lambda x, y: max(f(x, y) for f in ws)
-    return {"eye": union(eyes), "jaw": union(jaw)}
+    return {"eye": union(eyes)}
 
 def _limit_to_part(mesh, before, weight):
     bx0, by0, bbw, bbh, ba = before
@@ -1392,17 +1519,9 @@ def _apply_face_mesh(mesh, face, eye, jaw, nose, weights, bx, by, bw, bh, freeze
             dab(mode, face[key][0], face[key][1], eye_r, 3.0 * abs(eye))
         finish("eye", before)
     if abs(jaw) >= 0.05:
-        before = start()
-        left, right = _jaw_ends(face)
-        box_w = face["box"][2]
-        jaw_r = max(14.0, 0.18 * box_w)
-        if jaw > 0.0:
-            a_left, a_right = 0.0, 180.0
-        else:
-            a_left, a_right = 180.0, 0.0
-        dab("push", left[0], left[1], jaw_r, abs(jaw), a_left)
-        dab("push", right[0], right[1], jaw_r, abs(jaw), a_right)
-        finish("jaw", before)
+        field, rect = _jaw_field(face, jaw, part_feather)
+        if _add_field(mesh, field, rect, weights, bx, by, bw, bh, freeze_src, freeze_feather, layer):
+            touched = True
     if abs(nose) >= 0.05:
         field, rect = _nose_field(face, nose, part_feather)
         if _add_field(mesh, field, rect, weights, bx, by, bw, bh, freeze_src, freeze_feather, layer):

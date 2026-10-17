@@ -956,7 +956,7 @@ def _nose_part(f, pad=1.0):
     def inside(x, y):
         u = (x - nx) * ux + (y - ny) * uy
         v = -(x - nx) * uy + (y - ny) * ux
-        return abs(u) < reach[0 if u < 0.0 else 1] + b and -0.14 * it - b < v < 0.16 * it + b
+        return abs(u) < reach[0 if u < 0.0 else 1] + b and -0.5 * it - pad < v < 0.16 * it + max(b, 0.26 * it + pad)
     return inside
 jaw_out = lambda x, y: _ell(110.4, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y) or _ell(289.6, 357.2, 38.4 + fe + 2, 38.4 + fe + 2)(x, y)
 

@@ -1267,22 +1267,26 @@ def _alae(face, feather):
         dist = abs((mx - nx) * ux + (my - ny) * uy)
         reach.append(max(0.15 * inter, min(0.45 * inter, dist)))
     band = float(feather) if feather > 0.0 else max(4.0, 0.06 * face["box"][2])
-    return nx, ny, ux, uy, reach, -0.14 * inter, 0.16 * inter, band
+    return nx, ny, ux, uy, reach, -0.5 * inter, -0.12 * inter, 0.16 * inter, band, max(band, 0.26 * inter)
 
 def _nose_field(face, nose, feather):
-    nx, ny, ux, uy, reach, v0, v1, band = _alae(face, feather)
+    nx, ny, ux, uy, reach, top, v0, v1, band, low = _alae(face, feather)
     amount = 0.006 * nose * 0.5 * (reach[0] + reach[1])
     def field(x, y):
         dx, dy = x - nx, y - ny
         u = dx * ux + dy * uy
         v = -dx * uy + dy * ux
+        q = 1.0
         if v < v0:
-            kv = 1.0 - _smoother((v0 - v) / band)
+            t = min(1.0, (v0 - v) / (v0 - top))
+            kv = 1.0 - t * t * (3.0 - 2.0 * t)
+            q = 1.0 - 0.35 * t
         elif v > v1:
-            kv = 1.0 - _smoother((v - v1) / band)
+            t = min(1.0, (v - v1) / low)
+            kv = 1.0 - t * t * (3.0 - 2.0 * t)
         else:
             kv = 1.0
-        r = reach[0 if u < 0.0 else 1]
+        r = reach[0 if u < 0.0 else 1] * q
         au = abs(u)
         ku = min(1.0, au / (0.75 * r)) if au <= r else 1.0 - _smoother((au - r) / band)
         k = kv * ku
@@ -1292,7 +1296,7 @@ def _nose_field(face, nose, feather):
         return m * ux, m * uy
     pts = []
     for su, r in ((-1.0, reach[0]), (1.0, reach[1])):
-        for sv in (v0 - band, v1 + band):
+        for sv in (top, v1 + low):
             uu = su * (r + band)
             pts.append((nx + uu * ux - sv * uy, ny + uu * uy + sv * ux))
     xs = [q[0] for q in pts]; ys = [q[1] for q in pts]

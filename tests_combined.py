@@ -1,7 +1,7 @@
 # python-fu-eval combined test. env: T_IN (png), T_OUT (prefix)
 import os
 from gi.repository import Gimp, Gio
-src=os.environ.get("T_IN","/workspace/fs_test.png"); out=os.environ.get("T_OUT","/tmp/comb")
+src=os.environ["T_IN"]; out=os.environ.get("T_OUT","/tmp/comb")
 pdb=Gimp.get_pdb()
 def st(r):
     v=r.index(0); return getattr(v,"value_nick",v)

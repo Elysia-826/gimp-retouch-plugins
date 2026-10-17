@@ -108,7 +108,7 @@ def _paint_defaults(image):
             soft_fail()
 
 def run(procedure, run_mode, image, drawables, config, data):
-    bad = require_one_layer(procedure, drawables, "Select exactly one layer / 请选择一个图层")
+    bad = require_one_layer(procedure, drawables, "Select exactly one layer / 请选择一个图层", allow_group=True)
     if bad is not None:
         return bad
     if run_mode == Gimp.RunMode.INTERACTIVE:

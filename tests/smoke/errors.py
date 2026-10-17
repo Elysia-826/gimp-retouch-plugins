@@ -1,18 +1,19 @@
 ONE = "请选择一个图层 / Select one layer"
 EXACT = "Select exactly one layer / 请选择一个图层"
-EXPECT = {
-    "python-fu-action-record-start": ("success", "success"),
-    "python-fu-action-record-stop": ("execution-error", "execution-error"),
-    "python-fu-action-play": ("execution-error", "execution-error"),
-    "python-fu-de-shine": ("execution-error", "calling-error", ONE),
-    "python-fu-dnb-flow": ("execution-error", "calling-error", ONE),
-    "python-fu-dnb-setup": ("success", "calling-error", EXACT),
-    "python-fu-fsep-oneclick": ("execution-error", "calling-error", EXACT),
-    "python-fu-mesh-liquify": ("execution-error", "calling-error", EXACT),
-    "python-fu-mesh-liquify-face": ("execution-error", "calling-error", EXACT),
-    "python-fu-portrait-brush": ("success", "success"),
-    "python-fu-spot-heal": ("execution-error", "calling-error", ONE),
-    "python-fu-subject-select": ("execution-error", "calling-error", ONE),
+GROUP = "请选择一个普通图层，不要选图层组 / Select a normal layer, not a layer group"
+EXPECT = {   # (on a group, on nothing): (status, message or None)
+    "python-fu-action-record-start": (("calling-error", GROUP), ("calling-error", ONE)),
+    "python-fu-action-record-stop": (("execution-error", None), ("execution-error", None)),
+    "python-fu-action-play": (("calling-error", GROUP), ("calling-error", ONE)),
+    "python-fu-de-shine": (("calling-error", GROUP), ("calling-error", ONE)),
+    "python-fu-dnb-flow": (("calling-error", GROUP), ("calling-error", ONE)),
+    "python-fu-dnb-setup": (("success", None), ("calling-error", EXACT)),
+    "python-fu-fsep-oneclick": (("calling-error", GROUP), ("calling-error", EXACT)),
+    "python-fu-mesh-liquify": (("calling-error", GROUP), ("calling-error", EXACT)),
+    "python-fu-mesh-liquify-face": (("calling-error", GROUP), ("calling-error", EXACT)),
+    "python-fu-portrait-brush": (("success", None), ("success", None)),
+    "python-fu-spot-heal": (("calling-error", GROUP), ("calling-error", ONE)),
+    "python-fu-subject-select": (("calling-error", GROUP), ("calling-error", ONE)),
 }
 procs = []
 for line in open("bundle.lock", encoding="utf-8"):
@@ -36,9 +37,9 @@ for name in procs:
         st = res.index(0).value_nick
         msg = res.index(1) if st == "calling-error" and res.length() > 1 else ""
         ok("%s on %s -> %s %s" % (name, what, st, msg or ""))
-        if st != want[i]:
-            die("%s on %s: %s, expected %s" % (name, what, st, want[i]))
-        if st == "calling-error" and len(want) > 2 and msg != want[2]:
-            die("%s on %s: message %r, expected %r" % (name, what, msg, want[2]))
+        if st != want[i][0]:
+            die("%s on %s: %s, expected %s" % (name, what, st, want[i][0]))
+        if want[i][1] is not None and msg != want[i][1]:
+            die("%s on %s: message %r, expected %r" % (name, what, msg, want[i][1]))
         img.delete()
 ok("errors OK")

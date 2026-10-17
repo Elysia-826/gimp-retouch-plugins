@@ -130,11 +130,16 @@ def soft_fail(what=None):
         pass
 
 
-def require_one_layer(procedure, drawables, message="请选择一个图层 / Select one layer"):
-    """None when exactly one layer (groups count) is selected, else the CALLING_ERROR to return."""
-    if len(drawables) == 1 and isinstance(drawables[0], Gimp.Layer):
-        return None
-    return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR, GLib.Error(message))
+GROUP_MESSAGE = "请选择一个普通图层，不要选图层组 / Select a normal layer, not a layer group"
+
+
+def require_one_layer(procedure, drawables, message="请选择一个图层 / Select one layer", allow_group=False):
+    """None when exactly one layer is selected, else the CALLING_ERROR to return."""
+    if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
+        return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR, GLib.Error(message))
+    if drawables[0].is_group() and not allow_group:
+        return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR, GLib.Error(GROUP_MESSAGE))
+    return None
 
 
 def set_drawables(cfg, drawables):

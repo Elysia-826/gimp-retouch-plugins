@@ -11,7 +11,7 @@ gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
 from gi.repository import Gimp, GimpUi, GObject, GLib
 
-from retouch_common import set_drawables, soft_fail, undo_group
+from retouch_common import require_one_layer, set_drawables, soft_fail, undo_group
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layers
@@ -135,6 +135,9 @@ def _run_step(image, layer, step):
 
 
 def run_start(procedure, run_mode, image, drawables, config, data):
+    bad = require_one_layer(procedure, drawables)
+    if bad is not None:
+        return bad
     try:
         store.start(_gimp_dir())
     except Exception as exc:
@@ -161,6 +164,9 @@ def run_stop(procedure, run_mode, image, drawables, config, data):
 
 
 def run_play(procedure, run_mode, image, drawables, config, data):
+    bad = require_one_layer(procedure, drawables)
+    if bad is not None:
+        return bad
     if run_mode == Gimp.RunMode.INTERACTIVE:
         GimpUi.init(PLAY)
         dlg = GimpUi.ProcedureDialog.new(procedure, config, "播放动作 / Play Action")

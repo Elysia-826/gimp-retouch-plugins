@@ -13,15 +13,9 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import undo_group
+from retouch_common import _bytes, set_drawables, undo_group
 
 PROC = "python-fu-spot-heal"
-
-
-def _bytes(data):
-    if data is None:
-        return b""
-    return bytes(data)
 
 
 def _offsets(layer):
@@ -210,10 +204,7 @@ def _heal_one(image, layer, cx, cy, radius, sampling):
     cfg = proc.create_config()
     cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
     cfg.set_property("image", image)
-    if hasattr(cfg, "set_core_object_array"):
-        cfg.set_core_object_array("drawables", [layer])
-    else:
-        cfg.set_property("drawables", [layer])
+    set_drawables(cfg, [layer])
     cfg.set_property("adjustment", int(sampling))
     cfg.set_property("option", int(plan["direction"]))
     cfg.set_property("option-2", 1)  # fill inwards

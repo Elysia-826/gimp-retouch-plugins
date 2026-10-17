@@ -116,6 +116,46 @@ def _export_ppm(layer, path):
         f.write(raw)
 
 
+def set_drawables(cfg, drawables):
+    if hasattr(cfg, "set_core_object_array"):
+        cfg.set_core_object_array("drawables", drawables)
+    else:
+        cfg.set_property("drawables", drawables)
+
+
+def new_group(image, name):
+    if hasattr(Gimp, "GroupLayer"):
+        g = Gimp.GroupLayer.new(image, name)
+    else:
+        g = Gimp.Layer.group_new(image)
+    g.set_name(name)
+    return g
+
+
+def note_recorded(procedure, args, image=None, layer=None):
+    """If 动作录制 is recording, append this call. Missing recorder = do nothing."""
+    try:
+        import importlib.util
+        here = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.normpath(os.path.join(here, "..", "action_record", "store.py"))
+        if not os.path.isfile(path):
+            return
+        spec = importlib.util.spec_from_file_location("retouch_action_store", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        info = None
+        if image is not None and layer is not None:
+            lpath = os.path.normpath(os.path.join(here, "..", "action_record", "layers.py"))
+            if os.path.isfile(lpath):
+                lspec = importlib.util.spec_from_file_location("retouch_action_layers", lpath)
+                lmod = importlib.util.module_from_spec(lspec)
+                lspec.loader.exec_module(lmod)
+                info = lmod.record_target(image, layer, procedure)
+        mod.note_step(Gimp.directory() or "", procedure, args, info)
+    except Exception:
+        return
+
+
 @contextlib.contextmanager
 def undo_group(image):
     started = image.undo_group_start()

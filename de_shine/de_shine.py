@@ -198,11 +198,15 @@ def apply(image, layer, pro, strength, sens, soft, only_face, flash=False):
             image.reorder_item(brush, auto.get_parent(), image.get_item_position(auto))
             image.set_selected_layers([brush])
             try:
-                image.set_selected_drawables([bmask]) if hasattr(image, "set_selected_drawables") else None
+                if hasattr(image, "set_selected_drawables"):
+                    image.set_selected_drawables([bmask])
             except Exception:
                 pass
             try:
-                bmask.set_edit_mask(True) if hasattr(bmask, "set_edit_mask") else brush.set_edit_mask(True)
+                if hasattr(bmask, "set_edit_mask"):
+                    bmask.set_edit_mask(True)
+                else:
+                    brush.set_edit_mask(True)
             except Exception:
                 pass
             try:
@@ -210,7 +214,8 @@ def apply(image, layer, pro, strength, sens, soft, only_face, flash=False):
                 Gimp.context_set_background(Gegl.Color.new("black"))
                 Gimp.context_set_paint_method("gimp-paintbrush")
                 Gimp.context_set_opacity(max(5.0, float(strength)))
-                Gimp.context_set_brush_hardness(0.0) if hasattr(Gimp, "context_set_brush_hardness") else None
+                if hasattr(Gimp, "context_set_brush_hardness"):
+                    Gimp.context_set_brush_hardness(0.0)
             except Exception:
                 pass
         else:

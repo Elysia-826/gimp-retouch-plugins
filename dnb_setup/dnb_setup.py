@@ -7,36 +7,9 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import undo_group
+from retouch_common import new_group, note_recorded, undo_group
 
 PROC = "python-fu-dnb-setup"
-
-def _note_recorded(procedure, args, image=None, layer=None):
-    """If 动作录制 is recording, append this call. Missing recorder = do nothing."""
-    try:
-        import importlib.util
-        path = os.path.normpath(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "action_record", "store.py"))
-        if not os.path.isfile(path):
-            return
-        spec = importlib.util.spec_from_file_location("retouch_action_store", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        gdir = Gimp.directory() if hasattr(Gimp, "directory") else ""
-        info = None
-        if image is not None and layer is not None:
-            lpath = os.path.normpath(os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "..", "action_record", "layers.py"))
-            if os.path.isfile(lpath):
-                lspec = importlib.util.spec_from_file_location("retouch_action_layers", lpath)
-                lmod = importlib.util.module_from_spec(lspec)
-                lspec.loader.exec_module(lmod)
-                info = lmod.record_target(image, layer, procedure)
-        mod.note_step(gdir or "", procedure, args, info)
-    except Exception:
-        return
-
-
 
 def _color(s):
     c = Gegl.Color.new(s)
@@ -47,11 +20,6 @@ def _new_layer(image, name, mode, opacity=100.0):
                        Gimp.ImageType.RGBA_IMAGE if image.get_base_type() == Gimp.ImageBaseType.RGB
                        else Gimp.ImageType.GRAYA_IMAGE, opacity, mode)
     return l
-
-def _group(image, name):
-    g = Gimp.GroupLayer.new(image, name) if hasattr(Gimp, "GroupLayer") else Gimp.Layer.group_new(image)
-    g.set_name(name)
-    return g
 
 def _ok(r, what):
     if r is False:
@@ -91,12 +59,12 @@ def setup(image, layer, blend, contrast, on_top):
         else:
             parent = layer.get_parent()
             pos = image.get_item_position(layer)
-        grp = _group(image, "Dodge & Burn")
+        grp = new_group(image, "Dodge & Burn")
         image.insert_layer(grp, parent, pos)          # directly above active layer
         grp.set_mode(Gimp.LayerMode.PASS_THROUGH)     # blend children with layers below
 
         # Helper / observer group (hidden by default), placed on top
-        helper = _group(image, "观察层 Helper")
+        helper = new_group(image, "观察层 Helper")
         image.insert_layer(helper, grp, 0)
         if con is not None:
             # Desaturated (luminance) visible composite + S-curve, Normal mode
@@ -156,7 +124,7 @@ def run(procedure, run_mode, image, drawables, config, data):
             blend = ("soft-light", "overlay")[int(config.get_choice_id("blend-mode"))]
         setup(image, drawables[0], blend,
               config.get_property("contrast-boost"), config.get_property("place-on-top"))
-        _note_recorded(PROC, {
+        note_recorded(PROC, {
             "blend-mode": blend,
             "contrast-boost": bool(config.get_property("contrast-boost")),
             "place-on-top": bool(config.get_property("place-on-top")),

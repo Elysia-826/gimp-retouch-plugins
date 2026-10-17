@@ -10,7 +10,7 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _NOWIN, _bytes, _cv2_launcher, _export_ppm, undo_group
+from retouch_common import _bytes, _cv2_launcher, _export_ppm, new_group, _NOWIN, undo_group
 
 PROC = "python-fu-mesh-liquify"
 PROC_STROKE = "python-fu-mesh-liquify-stroke-layer"
@@ -215,7 +215,7 @@ def _original_of(group):
 
 def _make_state(image, layer):
     key = _pstr(layer, KEY) or uuid.uuid4().hex
-    group = Gimp.GroupLayer.new(image, "液化状态 Liquify State")
+    group = new_group(image, "液化状态 Liquify State")
     if not image.insert_layer(group, None, len(image.get_layers())):
         raise RuntimeError("insert state group failed")
     group.set_visible(False)

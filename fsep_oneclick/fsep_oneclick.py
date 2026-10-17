@@ -7,36 +7,9 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import undo_group
+from retouch_common import new_group, note_recorded, set_drawables, undo_group
 
 PROC = "python-fu-fsep-oneclick"
-
-def _note_recorded(procedure, args, image=None, layer=None):
-    """If 动作录制 is recording, append this call. Missing recorder = do nothing."""
-    try:
-        import importlib.util
-        path = os.path.normpath(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "action_record", "store.py"))
-        if not os.path.isfile(path):
-            return
-        spec = importlib.util.spec_from_file_location("retouch_action_store", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        gdir = Gimp.directory() if hasattr(Gimp, "directory") else ""
-        info = None
-        if image is not None and layer is not None:
-            lpath = os.path.normpath(os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "..", "action_record", "layers.py"))
-            if os.path.isfile(lpath):
-                lspec = importlib.util.spec_from_file_location("retouch_action_layers", lpath)
-                lmod = importlib.util.module_from_spec(lspec)
-                lspec.loader.exec_module(lmod)
-                info = lmod.record_target(image, layer, procedure)
-        mod.note_step(gdir or "", procedure, args, info)
-    except Exception:
-        return
-
-
 
 def _blur(image, drawable, radius):
     pdb = Gimp.get_pdb()
@@ -48,7 +21,7 @@ def _blur(image, drawable, radius):
         # 3.0/3.2 compat wrapper: drawables array or single drawable
         names = [p.get_name() for p in proc.get_arguments()]
         if "drawables" in names:
-            cfg.set_core_object_array("drawables", [drawable]) if hasattr(cfg, "set_core_object_array") else cfg.set_property("drawables", [drawable])
+            set_drawables(cfg, [drawable])
         else:
             cfg.set_property("drawable", drawable)
         cfg.set_property("horizontal", float(radius))
@@ -67,7 +40,8 @@ def _blur(image, drawable, radius):
     src = g.create_child("gegl:buffer-source"); src.set_property("buffer", src_buf)
     blur = g.create_child("gegl:gaussian-blur")
     blur.set_property("std-dev-x", float(radius)); blur.set_property("std-dev-y", float(radius))
-    blur.set_property("abyss-policy", Gegl.AbyssPolicy.CLAMP) if hasattr(Gegl, "AbyssPolicy") else None
+    if hasattr(Gegl, "AbyssPolicy"):
+        blur.set_property("abyss-policy", Gegl.AbyssPolicy.CLAMP)
     dst = g.create_child("gegl:write-buffer"); dst.set_property("buffer", dst_buf)
     src.link(blur); blur.link(dst); dst.process()
     dst_buf.flush()
@@ -83,8 +57,7 @@ def separate(image, layer, radius):
     with undo_group(image):
         pos = image.get_item_position(layer)
         parent = layer.get_parent()
-        group = Gimp.GroupLayer.new(image, "Frequency Separation") if hasattr(Gimp, "GroupLayer") else Gimp.Layer.group_new(image)
-        group.set_name("Frequency Separation")
+        group = new_group(image, "Frequency Separation")
         image.insert_layer(group, parent, pos)
         low = layer.copy(); low.set_name("Low (低频)")
         image.insert_layer(low, group, 0)
@@ -131,7 +104,7 @@ def run(procedure, run_mode, image, drawables, config, data):
             return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, None)
     try:
         separate(image, drawables[0], config.get_property("radius"))
-        _note_recorded(PROC, {"radius": float(config.get_property("radius"))}, image, drawables[0])
+        note_recorded(PROC, {"radius": float(config.get_property("radius"))}, image, drawables[0])
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)

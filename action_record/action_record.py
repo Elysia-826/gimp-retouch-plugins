@@ -11,7 +11,7 @@ gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
 from gi.repository import Gimp, GimpUi, GObject, GLib
 
-from retouch_common import undo_group
+from retouch_common import set_drawables, undo_group
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layers
@@ -60,10 +60,7 @@ def _active_layer(image, fallback):
 def _set_drawables(cfg, proc, layer):
     names = [p.get_name() for p in proc.get_arguments()]
     if "drawables" in names:
-        if hasattr(cfg, "set_core_object_array"):
-            cfg.set_core_object_array("drawables", [layer])
-        else:
-            cfg.set_property("drawables", [layer])
+        set_drawables(cfg, [layer])
     elif "drawable" in names:
         cfg.set_property("drawable", layer)
 

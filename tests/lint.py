@@ -9,6 +9,8 @@ for row in open(os.path.join(repo, "bundle.lock"), encoding="utf-8"):
     if len(cols) > 4 and cols[3] == "ours":
         shipped.update(p for p in cols[4].split() if p.endswith(".py"))
 rules = [(r"undo_group_(start|end)\(", "use `with undo_group(image):` from retouch_common", lambda f: f != "retouch_common.py"),
+         (r"^def (_bytes|_python_candidates|_helper_env|_cv2_launcher|_export_ppm|_?note_recorded|undo_group|set_drawables|new_group)\(|set_core_object_array|GroupLayer\.new|group_new\(",
+          "use the copy in retouch_common", lambda f: f != "retouch_common.py"),
          (r"/home/box|/workspace|/tmp/", "no machine paths in shipped code; use an env var or tempfile", lambda f: f in shipped)]
 bad = 0
 for f in files + sorted(shipped - set(files)):

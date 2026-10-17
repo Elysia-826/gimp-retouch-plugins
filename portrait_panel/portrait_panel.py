@@ -21,7 +21,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gtk, Gdk, Gegl
 
-from retouch_common import undo_group
+from retouch_common import new_group, set_drawables, undo_group
 
 PROC = "python-fu-portrait-panel"
 GROUP_NAME = "插件改动"
@@ -224,8 +224,7 @@ def _find_child(group, name):
 
 
 def _new_group(image, name):
-    g = Gimp.GroupLayer.new(image, name) if hasattr(Gimp, "GroupLayer") else Gimp.Layer.group_new(image)
-    g.set_name(name)
+    g = new_group(image, name)
     g.set_mode(Gimp.LayerMode.PASS_THROUGH)
     return g
 
@@ -264,10 +263,7 @@ def _run_noninteractive(name, image, layer, **props):
     cfg = proc.create_config()
     cfg.set_property("run-mode", Gimp.RunMode.NONINTERACTIVE)
     cfg.set_property("image", image)
-    if hasattr(cfg, "set_core_object_array"):
-        cfg.set_core_object_array("drawables", [layer])
-    else:
-        cfg.set_property("drawables", [layer])
+    set_drawables(cfg, [layer])
     for k, v in props.items():
         cfg.set_property(k, v)
     res = proc.run(cfg)
@@ -1048,9 +1044,7 @@ def ensure_group(image):
     g = find_group(image)
     if g is not None:
         return g
-    g = Gimp.GroupLayer.new(image, GROUP_NAME) if hasattr(Gimp, "GroupLayer") else Gimp.Layer.group_new(image)
-    if not hasattr(Gimp, "GroupLayer"):
-        g.set_name(GROUP_NAME)
+    g = new_group(image, GROUP_NAME)
     image.insert_layer(g, None, 0)
     g.set_mode(Gimp.LayerMode.PASS_THROUGH)
     return g
@@ -1400,10 +1394,7 @@ class Panel:
                 cfg.set_property("image", image)
             if "drawables" in props:
                 ds = [l for l in image.get_selected_layers() if not l.is_group()] or [_working_layer(image)]
-                if hasattr(cfg, "set_core_object_array"):
-                    cfg.set_core_object_array("drawables", ds)
-                else:
-                    cfg.set_property("drawables", ds)
+                set_drawables(cfg, ds)
             res = proc.run(cfg)
             st = res.index(0)
             self.status.set_text("完成" if st == Gimp.PDBStatusType.SUCCESS else
@@ -1515,7 +1506,8 @@ class Panel:
             fg = Gimp.context_get_foreground().get_rgba()
             lum = 0.3 * fg[0] + 0.6 * fg[1] + 0.1 * fg[2]
             self.swap_btn.set_label("涂/擦切换")
-            self.status.set_text("现在：%s" % ("白色涂=加" if lum >= 0.5 else "黑色涂=擦")) if hasattr(self, "status") else None
+            if hasattr(self, "status"):
+                self.status.set_text("现在：%s" % ("白色涂=加" if lum >= 0.5 else "黑色涂=擦"))
         except Exception:
             pass
 

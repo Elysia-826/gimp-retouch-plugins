@@ -14,15 +14,9 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import undo_group
+from retouch_common import _bytes, undo_group
 
 PROC = "python-fu-dnb-flow"
-
-
-def _bytes(data):
-    if data is None:
-        return b""
-    return bytes(data)
 
 
 def _falloff(d, radius, inner, span):

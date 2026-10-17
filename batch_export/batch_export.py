@@ -158,7 +158,8 @@ def _process_one(path, out_paths, o):
                 else:
                     kw.update({"compression": 9})
                 if not o["keep_exif"]:
-                    exp.set_metadata(Gimp.Metadata.new()) if hasattr(Gimp, "Metadata") else None
+                    if hasattr(Gimp, "Metadata"):
+                        exp.set_metadata(Gimp.Metadata.new())
                 _pdb_run(FMT[fmt][1], **kw)
             finally:
                 exp.delete()

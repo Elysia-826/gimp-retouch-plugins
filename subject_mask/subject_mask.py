@@ -17,37 +17,9 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _NOWIN, _cv2_launcher, _export_ppm, undo_group
+from retouch_common import _cv2_launcher, _export_ppm, note_recorded, _NOWIN, undo_group
 
 PROC = "python-fu-subject-select"
-
-def _note_recorded(procedure, args, image=None, layer=None):
-    """If 动作录制 is recording, append this call. Missing recorder = do nothing."""
-    try:
-        import importlib.util
-        path = os.path.normpath(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "action_record", "store.py"))
-        if not os.path.isfile(path):
-            return
-        spec = importlib.util.spec_from_file_location("retouch_action_store", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        gdir = Gimp.directory() if hasattr(Gimp, "directory") else ""
-        info = None
-        if image is not None and layer is not None:
-            lpath = os.path.normpath(os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "..", "action_record", "layers.py"))
-            if os.path.isfile(lpath):
-                lspec = importlib.util.spec_from_file_location("retouch_action_layers", lpath)
-                lmod = importlib.util.module_from_spec(lspec)
-                lspec.loader.exec_module(lmod)
-                info = lmod.record_target(image, layer, procedure)
-        mod.note_step(gdir or "", procedure, args, info)
-    except Exception:
-        return
-
-
-
 
 # Groups that 一键频率分离 (fsep_oneclick) and 一键加深减淡搭建 (dnb_setup) create,
 # by the exact names those plug-ins assign. Every layer they add (Low/High,
@@ -254,7 +226,7 @@ def run(procedure, run_mode, image, drawables, config, data):
         # layer is never the photo. Read and record the photo underneath.
         target, _replaced = photo_layer_for(image, drawables[0])
         apply_selection(image, target, mode, config.get_property("feather"))
-        _note_recorded(PROC, {"mode": mode, "feather": float(config.get_property("feather"))}, image, target)
+        note_recorded(PROC, {"mode": mode, "feather": float(config.get_property("feather"))}, image, target)
     except Exception as e:
         return procedure.new_return_values(Gimp.PDBStatusType.EXECUTION_ERROR, GLib.Error(str(e)))
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)

@@ -8,8 +8,17 @@ Gegl.init(None)
 __import__("sys").path.insert(0, os.path.abspath("."))
 spec = importlib.util.spec_from_file_location("pp", os.path.abspath("portrait_panel/portrait_panel.py"))
 pp = importlib.util.module_from_spec(spec); spec.loader.exec_module(pp)
-SRC = os.environ.get("PP_TEST_IMAGE", "/workspace/retouch-trial/before.jpg")
+SRC = os.environ.get("PP_TEST_IMAGE", "tests/data/astronaut.jpg")
 img = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(SRC))
+
+
+FAILS = []
+
+
+def need(cond, what):
+    print("PP_TEST %s %s" % ("check" if cond else "FAIL", what), flush=True)
+    if not cond:
+        FAILS.append(what)
 
 
 def composite(image):
@@ -27,6 +36,7 @@ def tree(items, ind=""):
             if m is not None:
                 mb = bytes(m.get_buffer().get(Gegl.Rectangle.new(0, 0, m.get_width(), m.get_height()), 1.0, "Y u8", Gegl.AbyssPolicy.NONE))
                 extra.append("mask_max=%d" % max(mb))
+                need(max(mb) == 0, l.get_name() + " mask is black")
             extra.append("mode=%s op=%.0f" % (str(l.get_mode()).split(" ")[1], l.get_opacity()))
         print("PP_TEST %s%s%s vis=%s %s" % (ind, "[G] " if l.is_group() else "", l.get_name(), l.get_visible(), " ".join(extra)), flush=True)
         if l.is_group():
@@ -43,7 +53,14 @@ for key in ("ws:dnb", "ws:deshine", "ws:fsep", "ws:heal"):
         Gimp.context_get_opacity(), Gimp.context_get_paint_method(),
         Gimp.context_get_brush().get_name(), Gimp.context_get_brush_hardness(), Gimp.context_get_brush_size()), flush=True)
     after = composite(img)
-    print("PP_TEST   composite max diff vs original = %d" % max(abs(a - b) for a, b in zip(before[::5], after[::5])), flush=True)
+    dmax = max(abs(a - b) for a, b in zip(before[::5], after[::5]))
+    print("PP_TEST   composite max diff vs original = %d" % dmax, flush=True)
+    need(dmax <= 1, key + " keeps the composite")
+    if key in ("ws:dnb", "ws:deshine"):
+        need(edit, key + " selects the mask")
 tree(img.get_layers())
-print("PP_TEST again dnb ->", pp.build_workspace(img, "ws:dnb"), flush=True)
+again = pp.build_workspace(img, "ws:dnb")
+print("PP_TEST again dnb ->", again, flush=True)
+need("已经有了" in again, "second ws:dnb reuses the first")
 print("PP_TEST done", flush=True)
+print("PP_TEST OK" if not FAILS else "PP_TEST FAIL %d" % len(FAILS), flush=True)

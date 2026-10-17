@@ -7,8 +7,17 @@ from gi.repository import Gimp, Gegl, Gio
 __import__("sys").path.insert(0, os.path.abspath("."))
 spec = importlib.util.spec_from_file_location("pp", os.path.abspath("portrait_panel/portrait_panel.py"))
 pp = importlib.util.module_from_spec(spec); spec.loader.exec_module(pp)
-img = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path("/workspace/retouch-trial/before.jpg"))
-E = (560, 1560, 240, 130)    # around the eye at (675,1621)
+img = Gimp.file_load(Gimp.RunMode.NONINTERACTIVE, Gio.File.new_for_path(os.environ.get("PP_TEST_IMAGE", "tests/data/astronaut.jpg")))
+E = tuple(int(v) for v in os.environ.get("PP_BOX_EYE", "376,190,60,30").split(","))    # around one eye (before.jpg: 560,1560,240,130)
+
+
+FAILS = []
+
+
+def need(cond, what):
+    print("EYE %s %s" % ("check" if cond else "FAIL", what), flush=True)
+    if not cond:
+        FAILS.append(what)
 
 
 def px(image, rect):
@@ -23,10 +32,13 @@ before_all = px(img, full)
 img.select_ellipse(Gimp.ChannelOps.REPLACE, *E)
 print("EYE", pp.build_workspace(img, "ws:eye"), flush=True)
 after_all = px(img, full)
-print("EYE black masks: max diff whole image = %d" % max(abs(a - b) for a, b in zip(before_all[::3], after_all[::3])), flush=True)
+dmax = max(abs(a - b) for a, b in zip(before_all[::3], after_all[::3]))
+print("EYE black masks: max diff whole image = %d" % dmax, flush=True)
+need(dmax <= 1, "black masks change nothing")
 sel = img.get_selected_layers()[0]
 print("EYE selected=%s edit_mask=%s op=%.0f size=%.0f fg=%s sel_empty=%s" % (sel.get_name(), sel.get_edit_mask(), Gimp.context_get_opacity(),
       Gimp.context_get_brush_size(), Gimp.context_get_foreground().get_rgba(), Gimp.Selection.is_empty(img)), flush=True)
+need(sel.get_edit_mask() and not Gimp.Selection.is_empty(img), "eye-white mask selected, selection kept")
 top = pp.find_group(img); eg = pp._find_child(top, "眼部修饰")
 def tree(it, ind=""):
     for c in it:
@@ -49,11 +61,17 @@ for sub in (pp.EYE_WHITE, pp.EYE_IRIS):
     hs = lambda b, i: (max(b[i:i+3]) - min(b[i:i+3])) / max(1, max(b[i:i+3]))
     s0 = sum(hs(base, i*3) for i in bright) / max(1, len(bright)); s1 = sum(hs(full_b, i*3) for i in bright) / max(1, len(bright))
     print("EYE %s bright-px mean lift %.1f, HSV sat %.3f->%.3f (%+.0f%%)" % (sub[:4], sum(ds[i] for i in bright) / max(1, len(bright)), s0, s1, (s1/s0-1)*100 if s0 else 0), flush=True)
+    need(sum(ds[i] for i in bright) / max(1, len(bright)) > 2, sub[:4] + " brightens")
+    if sub == pp.EYE_WHITE:
+        need(s1 < s0, "eye white loses saturation")
     print("EYE %s mask full: max lift %.1f, mean lift %.1f, max channel after %d (before %d), pupil(<40) mean lift %.1f, bright-px chroma %.1f->%.1f" % (
         sub[:4], max(ds), sum(ds) / n, max(full_b), max(base), sum(ds[i] for i in dark) / max(1, len(dark)), sat0, sat1), flush=True)
     Gimp.context_push(); Gimp.context_set_opacity(100.0); Gimp.context_set_foreground(Gegl.Color.new("black"))
     m.edit_fill(Gimp.FillType.FOREGROUND); Gimp.context_pop()
 pp.set_eye_strengths({"white": 55.0, "iris": 20.0}, img)
-print("EYE strengths applied:", [(c.get_name(), round(c.get_opacity())) for s in eg.get_children() for c in s.get_children()], flush=True)
+ops = [(c.get_name(), round(c.get_opacity())) for s in eg.get_children() for c in s.get_children()]
+print("EYE strengths applied:", ops, flush=True)
+need(ops[0][1] == 55 and ops[-1][1] == 20, "strengths reach the layers")
 pp.set_eye_strengths(pp.EYE_DEFAULTS)
 print("EYE done", flush=True)
+print("EYE OK" if not FAILS else "EYE FAIL %d" % len(FAILS), flush=True)

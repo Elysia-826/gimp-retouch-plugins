@@ -1,5 +1,6 @@
-import importlib.util
+import importlib.util, sys
 G = os.environ["GIMP3_DIRECTORY"]
+sys.path.insert(0, os.path.join(G, "plug-ins", "portrait_panel"))
 spec = importlib.util.spec_from_file_location("pp", os.path.join(G, "plug-ins", "portrait_panel", "portrait_panel.py"))
 pp = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pp)

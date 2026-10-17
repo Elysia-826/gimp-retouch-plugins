@@ -10,6 +10,8 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
+from retouch_common import undo_group
+
 PROC = "python-fu-mesh-liquify"
 PROC_STROKE = "python-fu-mesh-liquify-stroke-layer"
 PROC_UNDO = "python-fu-mesh-liquify-undo"
@@ -709,8 +711,7 @@ def prepare_stroke_layer(image, layer):
     if layer is not None and layer.is_group():
         raise RuntimeError("Select a normal layer first / 请先选中普通图层")
     existing = _find_stroke_layer(image.get_layers())
-    started = image.undo_group_start()
-    try:
+    with undo_group(image):
         if existing is not None:
             existing.set_visible(True)
             image.set_selected_layers([existing])
@@ -722,9 +723,6 @@ def prepare_stroke_layer(image, layer):
         sl.get_buffer().set(Gegl.Rectangle.new(0, 0, w, h), "R'G'B'A u8", bytes(w * h * 4))
         sl.update(0, 0, w, h)
         image.set_selected_layers([sl])
-    finally:
-        if started:
-            image.undo_group_end()
     Gimp.displays_flush()
 
 def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise, weights, wx, wy, ww, wh,
@@ -1008,8 +1006,7 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
                      weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample, poly, reverse)
     if not touched:
         return
-    started = image.undo_group_start()
-    try:
+    with undo_group(image):
         if orig is None:
             group, orig = _make_state(image, layer)
         hist = _load_stack(layer, HIST)
@@ -1027,9 +1024,6 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
         if stroke_layer is not None:
             stroke_layer.set_visible(False)
         image.set_selected_layers([layer])
-    finally:
-        if started:
-            image.undo_group_end()
     if os.environ.get("MESH_LIQUIFY_LOG"):
         print("[mesh-liquify] mode=%s max_disp=%.3f bbox=%d,%d %dx%d %.2fs" % (
             mode, mesh.max_abs(), mesh.x, mesh.y, mesh.bw, mesh.bh, time.perf_counter() - t0),
@@ -1565,8 +1559,7 @@ def face_adjust(image, layer, source, eye, jaw, nose, box, freeze_mode="none", f
                                part_only, part_feather)
     if not touched:
         return
-    started = image.undo_group_start()
-    try:
+    with undo_group(image):
         if orig is None:
             group, orig = _make_state(image, layer)
         hist = _load_stack(layer, HIST)
@@ -1580,9 +1573,6 @@ def face_adjust(image, layer, source, eye, jaw, nose, box, freeze_mode="none", f
         if freeze_mode == "layer" and freeze_layer is not None:
             freeze_layer.set_visible(False)
         image.set_selected_layers([layer])
-    finally:
-        if started:
-            image.undo_group_end()
     Gimp.displays_flush()
 
 def run_face(procedure, run_mode, image, drawables, config, data):
@@ -1670,8 +1660,7 @@ def step_stroke(image, layer, redo):
     if len(other) > HIST_MAX:
         other = other[-HIST_MAX:]
     mesh = _mesh_from_blob(blob, w, h)
-    started = image.undo_group_start()
-    try:
+    with undo_group(image):
         _save_stack(layer, src_name, stack)
         _save_stack(layer, dst_name, other)
         _save_mesh(layer, mesh)
@@ -1679,9 +1668,6 @@ def step_stroke(image, layer, redo):
         if group is not None:
             group.set_visible(False)
         image.set_selected_layers([layer])
-    finally:
-        if started:
-            image.undo_group_end()
     Gimp.displays_flush()
 
 def run_step(procedure, run_mode, image, drawables, config, data):

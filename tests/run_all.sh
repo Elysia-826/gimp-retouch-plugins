@@ -30,6 +30,9 @@ smoke() { gc "$1-smoke" "exec(open('tests/smoke/common.py').read()); exec(open('
 echo "== catalog (installer/bundle.py --check-catalog)"
 python3 installer/bundle.py --check-catalog > "$L/catalog.log" 2>&1; CAT=$?
 [ $CAT = 0 ] && echo "  pass" || { echo "  FAIL exit $CAT"; grep ERROR "$L/catalog.log" | sed 's/^/    /'; }
+echo "== lint (tests/lint.py)"
+python3 tests/lint.py > "$L/lint.log" 2>&1; LINT=$?
+[ $LINT = 0 ] && echo "  pass" || { echo "  FAIL"; grep "^LINT" "$L/lint.log" | head -20 | sed 's/^/    /'; }
 echo "== install into $G"
 python3 tests/install_lock.py "$G" > "$L/install.log" 2>&1
 for d in $KD_EXTRA_PLUGINS; do cp -r "$d" "$G/plug-ins/"; done
@@ -64,12 +67,17 @@ for p in $PLUGINS; do
         else NOTE[$p]="GUI skipped (missing:$NOGUI)"; fi ;;
     *) smoke $p ;;
     esac
+    case $p in batch_export|portrait_panel) ;; *)
+        gc $p-errors "exec(open('tests/smoke/common.py').read()); exec(open('tests/smoke/errors.py').read())" SMOKE_NAME=$p
+        check $p $p-errors "SMOKE $p errors OK" ;;
+    esac
 done
 
 echo
 echo "== result ($(( $(date +%s) - T0 )) s, logs in $L)"
 FAILED=0
 [ $CAT = 0 ] && echo "  catalog         pass" || { echo "  catalog         FAIL"; FAILED=1; }
+[ $LINT = 0 ] && echo "  lint            pass" || { echo "  lint            FAIL"; FAILED=1; }
 for p in $PLUGINS; do
     printf "  %-15s %s %s\n" $p ${RES[$p]} "${NOTE[$p]}"
     [ "${RES[$p]}" = FAIL ] && FAILED=1

@@ -7,6 +7,8 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
+from retouch_common import undo_group
+
 PROC = "python-fu-dnb-setup"
 
 def _note_recorded(procedure, args, image=None, layer=None):
@@ -77,8 +79,7 @@ def setup(image, layer, blend, contrast, on_top):
                      "'Dodge & Burn' group already exists; selected its D&B layer instead of creating another.")
         Gimp.displays_flush()
         return
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         # Snapshot visible composite first (works when a group is active)
         con = None
         if contrast:
@@ -120,8 +121,6 @@ def setup(image, layer, blend, contrast, on_top):
         _ok(dnb.fill(Gimp.FillType.FOREGROUND), "fill")
 
         image.set_selected_layers([dnb])
-    finally:
-        image.undo_group_end()
     _paint_defaults(image)
     Gimp.displays_flush()
 
@@ -139,14 +138,6 @@ def _paint_defaults(image):
             fn()
         except Exception:
             pass
-
-
-def _unused():
-    try:
-        pass
-    finally:
-        image.undo_group_end()
-    Gimp.displays_flush()
 
 def run(procedure, run_mode, image, drawables, config, data):
     if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):  # groups allowed

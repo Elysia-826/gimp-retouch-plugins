@@ -17,6 +17,8 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
+from retouch_common import undo_group
+
 PROC = "python-fu-subject-select"
 
 def _note_recorded(procedure, args, image=None, layer=None):
@@ -328,8 +330,7 @@ def apply_selection(image, layer, mode, feather):
     if mode == "skin":
         radius = min(radius, 1.0)
     radius = max(0.0, min(20.0, radius))
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         _drop_named(image, name)
         ch = Gimp.Channel.new(image, name, image.get_width(), image.get_height(), 50.0, Gegl.Color.new("black"))
         image.insert_channel(ch, None, 0)
@@ -338,8 +339,6 @@ def apply_selection(image, layer, mode, feather):
         image.select_item(Gimp.ChannelOps.REPLACE, ch)
         if radius > 0.0:
             Gimp.Selection.feather(image, radius)
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return info
 

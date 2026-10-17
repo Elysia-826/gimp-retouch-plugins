@@ -14,6 +14,8 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
+from retouch_common import undo_group
+
 PROC = "python-fu-dnb-flow"
 
 
@@ -131,12 +133,9 @@ def apply_stroke(image, layer, mode, x1, y1, x2, y2, radius, flow, opacity, hard
                     changed += 1
     if changed == 0:
         return 0
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         layer.get_buffer().set(rect, fmt, bytes(raw))
         layer.update(0, 0, w, h)
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return changed
 

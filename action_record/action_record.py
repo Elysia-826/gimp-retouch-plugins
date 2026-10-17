@@ -11,6 +11,8 @@ gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
 from gi.repository import Gimp, GimpUi, GObject, GLib
 
+from retouch_common import undo_group
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layers
 import store
@@ -173,12 +175,9 @@ def run_play(procedure, run_mode, image, drawables, config, data):
     layer = drawables[0] if drawables else None
     try:
         action = store.load_action(_gimp_dir(), config.get_property("action-name"))
-        image.undo_group_start()
-        try:
+        with undo_group(image):
             for step in action.get("steps") or []:
                 layer = _run_step(image, layer, step)
-        finally:
-            image.undo_group_end()
     except Exception as exc:
         return _fail(procedure, Gimp.PDBStatusType.EXECUTION_ERROR, str(exc))
     Gimp.displays_flush()

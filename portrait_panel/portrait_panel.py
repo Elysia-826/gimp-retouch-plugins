@@ -20,6 +20,8 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gtk, Gdk, Gegl
 
+from retouch_common import undo_group
+
 PROC = "python-fu-portrait-panel"
 GROUP_NAME = "插件改动"
 BACKUP_NAME = "原图（锁定）"
@@ -333,8 +335,7 @@ def build_eye(image, top, rank):
         return "请先框选眼睛（用椭圆或套索选区圈住眼睛），再点“眼部修饰”。"
     st = eye_strengths()
     _ok, _non, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         eg = _new_group(image, WS_NAMES["ws:eye"])
         _insert_ranked(image, top, eg, rank)
         subs = {}
@@ -356,8 +357,6 @@ def build_eye(image, top, rank):
             Gimp.context_set_brush_size(max(3.0, min(x2 - x1, y2 - y1) / 4.0))
         except Exception:
             notes.append("brush size")
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return ("眼部修饰已建好：眼白、瞳孔两个涂抹层。选区保留着，只能涂在选区里。"
             "已选中眼白的蒙版：白色软画笔 20% 涂眼白；瞳孔请在图层面板点“瞳孔提亮”组的蒙版再涂。"
@@ -614,8 +613,7 @@ def sharpen_oneclick(image):
         start_retouch(image)
     st = sharpen_settings()
     sel = not Gimp.Selection.is_empty(image)
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         top = ensure_group(image)
         old = find_sharpen(image)
         lay = _sharpen_snapshot(image, st)
@@ -628,8 +626,6 @@ def sharpen_oneclick(image):
             _insert_ranked(image, top, lay, WS["ws:sharpen"][1])
         lay.add_mask(lay.create_mask(Gimp.AddMaskType.SELECTION if sel else Gimp.AddMaskType.WHITE))
         _select_mask(image, lay)
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return ("已锐化%s（半径 %.1f、力度 %.1f、不透明度 %d%%）。蒙版就是选区，白色涂=加、黑色涂=擦；改了前面的步骤再点“更新锐化”。"
             % ("选区" if sel else "整张", st["radius"], st["amount"], round(st["opacity"])))
@@ -642,8 +638,7 @@ def sharpen_refresh(image):
         return "还没有锐化层。先点“涂抹锐化”或“一键锐化”。"
     st = sharpen_settings()
     st["opacity"] = old.get_opacity()
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         lay = _sharpen_snapshot(image, st)
         parent = old.get_parent()
         pos = image.get_item_position(old)
@@ -654,8 +649,6 @@ def sharpen_refresh(image):
         image.remove_layer(old)
         lay.set_name(WS_NAMES["ws:sharpen"])   # GIMP renamed the duplicate name while old existed
         _select_mask(image, lay)
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return "锐化层已按现在的画面重新生成，蒙版没变。"
 
@@ -664,15 +657,12 @@ def build_sharpen(image, top, rank):
     """锐化: snapshot of current visible + non-destructive USM + black mask (paint white to sharpen).
     Lives in “最后”; captures whatever is below so earlier edits stay in the sharpen look."""
     st = sharpen_settings()
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         lay = _sharpen_snapshot(image, st)
         _insert_ranked(image, top, lay, rank)
         _black_mask(lay)
         _select_mask(image, lay)
         notes = brush_setup(image, 20.0)
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return ("涂抹锐化已建好（半径 %.1f、力度 %.1f），点了画面不变。白色软画笔 20%% 在眼睛、头发、衣服边缘轻涂；皮肤少涂以免毛孔夸张。⚙ 可调。"
             % (st["radius"], st["amount"])
@@ -682,8 +672,7 @@ def build_sharpen(image, top, rank):
 def build_dered(image, top, rank):
     """皮肤减红: grey LCh Chroma (no HSV brightening). Black mask, paint white to reduce red."""
     st = dered_strength()
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         g = _new_group(image, WS_NAMES["ws:dered"])
         _insert_ranked(image, top, g, rank)
         lay = _solid_layer(image, DERED_LAYER, "#808080", Gimp.LayerMode.LCH_CHROMA, st)
@@ -691,8 +680,6 @@ def build_dered(image, top, rank):
         _black_mask(lay)
         _select_mask(image, lay)
         notes = brush_setup(image, 20.0)
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return ("去泛红已建好：只降红色，不会变亮，点了画面不变。白色软画笔 20% 在发红皮肤上轻涂。"
             + (" 没设上：" + "、".join(notes) if notes else ""))
@@ -701,8 +688,7 @@ def build_dered(image, top, rank):
 def build_unify(image, top, rank):
     """统一肤色: solid mid-skin in LCh Color — gentle hue/chroma pull, keeps L and texture."""
     st = unify_strength()
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         g = _new_group(image, WS_NAMES["ws:unify"])
         _insert_ranked(image, top, g, rank)
         lay = _solid_layer(image, UNIFY_LAYER, UNIFY_COLOR, Gimp.LayerMode.LCH_COLOR, st)
@@ -710,8 +696,6 @@ def build_unify(image, top, rank):
         _black_mask(lay)
         _select_mask(image, lay)
         notes = brush_setup(image, 20.0)
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return ("匀肤色已建好：颜色轻轻拉匀，纹理不变，点了画面不变。白色软画笔 20% 在要统一的皮肤上轻涂。"
             + (" 没设上：" + "、".join(notes) if notes else ""))
@@ -720,8 +704,7 @@ def build_unify(image, top, rank):
 def build_undereye(image, top, rank):
     """卧蚕压色: black soft-light darken + grey LCh chroma. User paints; no selection required."""
     st = under_strengths()
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         g = _new_group(image, WS_NAMES["ws:undereye"])
         _insert_ranked(image, top, g, rank)
         chroma = _solid_layer(image, UNDER_NAMES["chroma"], "#808080",
@@ -735,8 +718,6 @@ def build_undereye(image, top, rank):
         g.add_mask(m)
         _select_mask(image, g)
         notes = brush_setup(image, 20.0)
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return ("卧蚕压色已建好：压暗并去色，点了画面不变。白色软画笔 20% 涂卧蚕；想淡一点就少涂或调 ⚙。"
             + (" 没设上：" + "、".join(notes) if notes else ""))
@@ -748,8 +729,7 @@ def build_teeth(image, top, rank):
         return "请先框选牙齿（用椭圆或套索圈住牙齿），再点“牙齿美白”。"
     st = teeth_strengths()
     _ok, _non, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         g = _new_group(image, WS_NAMES["ws:teeth"])
         _insert_ranked(image, top, g, rank)
         chroma = _solid_layer(image, TEETH_NAMES["chroma"], "#808080",
@@ -766,8 +746,6 @@ def build_teeth(image, top, rank):
             Gimp.context_set_brush_size(max(3.0, min(x2 - x1, y2 - y1) / 3.0))
         except Exception:
             notes.append("brush size")
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return ("牙齿美白已建好：提亮并去黄，不会涂成死白，点了画面不变。选区保留着，只能涂在选区里。"
             "白色软画笔 20% 轻涂牙齿。"
@@ -785,8 +763,7 @@ def build_deshine(image, top, rank, title):
     except Exception:
         image.remove_layer(vis)
         raise
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         made = {l.get_name(): l for l in image.get_layers() if l.get_name() in ("去油光", "去油光画笔")}
         corr = made.get("去油光画笔")
         if corr is None:
@@ -821,8 +798,6 @@ def build_deshine(image, top, rank, title):
         image.reorder_item(ratio, g, pos)
         _select_mask(image, ratio)
         notes = brush_setup(image, 20.0)
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return ("去油光已建好（只压暗，不会把之前的修图盖掉），点了画面不变。白色软画笔 20% 在油光上轻涂。"
             + (" 没设上：" + "、".join(notes) if notes else ""))
@@ -883,8 +858,7 @@ def build_workspace(image, key):
         _run_noninteractive("python-fu-fsep-oneclick", image, photo, radius=0.0)
     if key == "ws:deshine":
         return build_deshine(image, top, rank, title)
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         notes = []
         if key == "ws:heal":
             lay = Gimp.Layer.new(image, title, image.get_width(), image.get_height(),
@@ -955,8 +929,6 @@ def build_workspace(image, key):
             _select_mask(image, up)
             notes = brush_setup(image, 20.0)
             msg = "提亮压暗已建好（不会把之前的修图盖掉），点了画面不变。已选中“提亮”：白色软画笔 20% 轻涂。"
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return msg + (" 没设上：" + "、".join(notes) if notes else "")
 
@@ -995,8 +967,7 @@ def toggle_preview(image):
     _ok, ox, oy = src.get_offsets()
     w, h = m.get_width(), m.get_height()
     data = bytes(m.get_buffer().get(Gegl.Rectangle.new(0, 0, w, h), 1.0, "Y u8", Gegl.AbyssPolicy.NONE))
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         pv = _solid_layer(image, PREVIEW_NAME, "#ff2020", Gimp.LayerMode.NORMAL, 50.0)
         image.insert_layer(pv, None, 0)
         pm = pv.create_mask(Gimp.AddMaskType.BLACK)
@@ -1005,8 +976,6 @@ def toggle_preview(image):
         pm.update(0, 0, image.get_width(), image.get_height())
         _preview_src[image.get_id()] = src.get_id()
         _select_mask(image, src)    # keep painting on the real mask
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return "红色 = 已经涂到的地方。再点一下关闭（关面板时也会自动删掉）。"
 
@@ -1056,8 +1025,7 @@ def start_retouch(image):
     photo = _photo_layer(image)
     if photo is None:
         raise RuntimeError("这张图里没有可用的图层")
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         bak = photo.copy()
         bak.set_name(BACKUP_NAME)
         image.insert_layer(bak, None, len(image.get_layers()))
@@ -1069,8 +1037,6 @@ def start_retouch(image):
                 pass
         ensure_group(image)
         image.set_selected_layers([photo])
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return "好了：原图已备份并锁住（最底下，隐藏），上面建了“插件改动”组。"
 

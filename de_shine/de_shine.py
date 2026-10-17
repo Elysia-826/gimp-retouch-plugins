@@ -21,6 +21,8 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
+from retouch_common import undo_group
+
 PROC = "python-fu-de-shine"
 LAYER = "去油光"
 BRUSH_LAYER = "去油光画笔"
@@ -295,8 +297,7 @@ def apply(image, layer, pro, strength, sens, soft, only_face, flash=False):
     rgb, mask, info = _run_helper(image, layer, sens, soft, only_face, flash)
     k = max(0.0, min(100.0, float(strength))) / 100.0
     scaled = mask.translate(bytes(int(v * k + 0.5) for v in range(256)))
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         _drop_layer(image, LAYER)
         _drop_layer(image, BRUSH_LAYER)
         auto, amask = _new_layer(image, layer, LAYER, rgb, scaled)
@@ -322,8 +323,6 @@ def apply(image, layer, pro, strength, sens, soft, only_face, flash=False):
                 pass
         else:
             image.set_selected_layers([auto])
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
     return info
 

@@ -7,6 +7,8 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
+from retouch_common import undo_group
+
 PROC = "python-fu-fsep-oneclick"
 
 def _note_recorded(procedure, args, image=None, layer=None):
@@ -78,8 +80,7 @@ def default_radius(image):
     return max(2.0, min(30.0, round(6.0 * s / 4000.0, 1)))
 
 def separate(image, layer, radius):
-    image.undo_group_start()
-    try:
+    with undo_group(image):
         pos = image.get_item_position(layer)
         parent = layer.get_parent()
         group = Gimp.GroupLayer.new(image, "Frequency Separation") if hasattr(Gimp, "GroupLayer") else Gimp.Layer.group_new(image)
@@ -112,8 +113,6 @@ def separate(image, layer, radius):
         layer.set_visible(False)
         high.set_mode(Gimp.LayerMode.GRAIN_MERGE)
         image.set_selected_layers([high])
-    finally:
-        image.undo_group_end()
     Gimp.displays_flush()
 
 def run(procedure, run_mode, image, drawables, config, data):

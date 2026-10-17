@@ -6,6 +6,7 @@ import gi
 gi.require_version("Gimp", "3.0"); gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gimp, GdkPixbuf
 
+__import__("sys").path.insert(0, os.path.abspath("."))
 spec = importlib.util.spec_from_file_location("pp", os.path.abspath("portrait_panel/portrait_panel.py"))
 pp = importlib.util.module_from_spec(spec); spec.loader.exec_module(pp)
 labels = [lab for _g, _t, items in pp.GROUPS for lab, _n, _tip in items]

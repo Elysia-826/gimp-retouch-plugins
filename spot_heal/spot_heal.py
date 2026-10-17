@@ -13,6 +13,8 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
+from retouch_common import undo_group
+
 PROC = "python-fu-spot-heal"
 
 
@@ -243,25 +245,24 @@ def spot_heal(image, layer, x, y, radius, x2, y2, x3, y3):
         saved = Gimp.Selection.save(image)
     healed = 0
     notes = []
-    image.undo_group_start()
-    try:
-        for cx, cy in pts:
-            ok, info = _heal_one(image, layer, cx, cy, radius, sampling)
-            if ok:
-                healed += 1
+    with undo_group(image):
+        try:
+            for cx, cy in pts:
+                ok, info = _heal_one(image, layer, cx, cy, radius, sampling)
+                if ok:
+                    healed += 1
+                else:
+                    notes.append(info)
+            if healed == 0:
+                raise RuntimeError(notes[0] if notes else "没有可修复的点 / nothing to heal")
+        except Exception:
+            raise
+        finally:
+            if saved is not None:
+                image.select_item(Gimp.ChannelOps.REPLACE, saved)
+                image.remove_channel(saved)
             else:
-                notes.append(info)
-        if healed == 0:
-            raise RuntimeError(notes[0] if notes else "没有可修复的点 / nothing to heal")
-    except Exception:
-        raise
-    finally:
-        if saved is not None:
-            image.select_item(Gimp.ChannelOps.REPLACE, saved)
-            image.remove_channel(saved)
-        else:
-            Gimp.Selection.none(image)
-        image.undo_group_end()
+                Gimp.Selection.none(image)
     Gimp.displays_flush()
     return healed
 

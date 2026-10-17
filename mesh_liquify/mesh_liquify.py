@@ -699,7 +699,7 @@ def prepare_stroke_layer(image, layer):
     if layer is not None and layer.is_group():
         raise RuntimeError("Select a normal layer first / 请先选中普通图层")
     existing = _find_stroke_layer(image.get_layers())
-    image.undo_group_start()
+    started = image.undo_group_start()
     try:
         if existing is not None:
             existing.set_visible(True)
@@ -713,7 +713,8 @@ def prepare_stroke_layer(image, layer):
         sl.update(0, 0, w, h)
         image.set_selected_layers([sl])
     finally:
-        image.undo_group_end()
+        if started:
+            image.undo_group_end()
     Gimp.displays_flush()
 
 def deform(mesh, mode, x1, y1, x2, y2, radius, strength, hardness, angle, clockwise, weights, wx, wy, ww, wh,
@@ -997,7 +998,7 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
                      weights, bx, by, bw, bh, freeze_src, freeze_feather, layer, sample, poly, reverse)
     if not touched:
         return
-    image.undo_group_start()
+    started = image.undo_group_start()
     try:
         if orig is None:
             group, orig = _make_state(image, layer)
@@ -1017,7 +1018,8 @@ def liquify(image, layer, mode, x1, y1, x2, y2, radius, strength, hardness, angl
             stroke_layer.set_visible(False)
         image.set_selected_layers([layer])
     finally:
-        image.undo_group_end()
+        if started:
+            image.undo_group_end()
     if os.environ.get("MESH_LIQUIFY_LOG"):
         print("[mesh-liquify] mode=%s max_disp=%.3f bbox=%d,%d %dx%d %.2fs" % (
             mode, mesh.max_abs(), mesh.x, mesh.y, mesh.bw, mesh.bh, time.perf_counter() - t0),
@@ -1374,7 +1376,7 @@ def face_adjust(image, layer, source, eye, jaw, nose, box, freeze_mode="none", f
                                part_only, part_feather)
     if not touched:
         return
-    image.undo_group_start()
+    started = image.undo_group_start()
     try:
         if orig is None:
             group, orig = _make_state(image, layer)
@@ -1390,7 +1392,8 @@ def face_adjust(image, layer, source, eye, jaw, nose, box, freeze_mode="none", f
             freeze_layer.set_visible(False)
         image.set_selected_layers([layer])
     finally:
-        image.undo_group_end()
+        if started:
+            image.undo_group_end()
     Gimp.displays_flush()
 
 def run_face(procedure, run_mode, image, drawables, config, data):
@@ -1478,7 +1481,7 @@ def step_stroke(image, layer, redo):
     if len(other) > HIST_MAX:
         other = other[-HIST_MAX:]
     mesh = _mesh_from_blob(blob, w, h)
-    image.undo_group_start()
+    started = image.undo_group_start()
     try:
         _save_stack(layer, src_name, stack)
         _save_stack(layer, dst_name, other)
@@ -1488,7 +1491,8 @@ def step_stroke(image, layer, redo):
             group.set_visible(False)
         image.set_selected_layers([layer])
     finally:
-        image.undo_group_end()
+        if started:
+            image.undo_group_end()
     Gimp.displays_flush()
 
 def run_step(procedure, run_mode, image, drawables, config, data):

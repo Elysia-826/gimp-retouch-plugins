@@ -21,7 +21,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GLib, Gtk, Gdk, Gegl
 
-from retouch_common import new_group, set_drawables, undo_group
+from retouch_common import new_group, set_drawables, soft_fail, undo_group
 
 PROC = "python-fu-portrait-panel"
 GROUP_NAME = "插件改动"
@@ -104,7 +104,7 @@ def save_geometry(win):
         with open(_cfg_path(), "w", encoding="utf-8") as f:
             json.dump({"x": x, "y": y, "w": w, "h": h}, f)
     except Exception:
-        pass
+        soft_fail()
 
 
 # workspace button -> (procedure for ⚙ / Shift+click, order rank inside 插件改动: higher = upper)
@@ -253,7 +253,7 @@ def _select_mask(image, layer):
         if layer.get_mask() is not None:
             layer.set_edit_mask(True)
     except Exception:
-        pass
+        soft_fail()
 
 
 def _run_noninteractive(name, image, layer, **props):
@@ -272,7 +272,7 @@ def _run_noninteractive(name, image, layer, **props):
         try:
             err = res.index(1)
         except Exception:
-            pass
+            soft_fail()
         raise RuntimeError("%s 没做成 %s" % (name, err or ""))
 
 
@@ -305,7 +305,7 @@ def set_eye_strengths(vals, image=None):
         with open(_cfg_path(), "w", encoding="utf-8") as f:
             json.dump(g, f)
     except Exception:
-        pass
+        soft_fail()
     if image is not None:
         top = find_group(image)
         eg = _find_child(top, WS_NAMES["ws:eye"]) if top is not None else None
@@ -382,7 +382,7 @@ def _save_json_cfg(g):
         with open(_cfg_path(), "w", encoding="utf-8") as f:
             json.dump(g, f)
     except Exception:
-        pass
+        soft_fail()
 
 
 def _cfg_float(key, default):
@@ -510,7 +510,7 @@ def set_sharpen_settings(vals, image=None):
         with open(_cfg_path(), "w", encoding="utf-8") as f:
             json.dump(g, f)
     except Exception:
-        pass
+        soft_fail()
     if image is not None:
         top = find_group(image)
         lay = _find_child(top, WS_NAMES["ws:sharpen"]) if top is not None else None
@@ -518,7 +518,7 @@ def set_sharpen_settings(vals, image=None):
             try:
                 lay.set_opacity(float(vals.get("opacity", lay.get_opacity())))
             except Exception:
-                pass
+                soft_fail()
             _apply_sharpen_filter(lay, vals)
             Gimp.displays_flush()
 
@@ -543,7 +543,7 @@ def _apply_sharpen_filter(lay, st):
     try:
         filt.update()
     except Exception:
-        pass
+        soft_fail()
     return filt
 
 
@@ -774,7 +774,7 @@ def build_deshine(image, top, rank, title):
         try:
             ratio.desaturate(Gimp.DesaturateMode.LUMINANCE)
         except Exception:
-            pass
+            soft_fail()
         ratio.set_name("去油光（白色涂=去油光，黑色涂=擦掉）")
         ratio.set_mode(Gimp.LayerMode.MULTIPLY)
         ratio.set_opacity(100.0)
@@ -1079,7 +1079,7 @@ def start_retouch(image):
             try:
                 getattr(bak, fn)(True)
             except Exception:
-                pass
+                soft_fail()
         ensure_group(image)
         image.set_selected_layers([photo])
     Gimp.displays_flush()
@@ -1130,7 +1130,7 @@ def poll_instance(srv, on_raise):
             if c.recv(16).startswith(b"raise"):
                 c.sendall(b"ok"); on_raise()
         except Exception:
-            pass
+            soft_fail()
         finally:
             c.close()
 
@@ -1143,7 +1143,7 @@ def release_instance(srv, lock_path=None):
         if mine:
             os.remove(lock_path or LOCK_PATH)
     except Exception:
-        pass
+        soft_fail()
 
 
 # ---- batch 2 item 9: per-button usage help (tooltip + ? popup) ----
@@ -1414,7 +1414,7 @@ class Panel:
             self.win.set_keep_above(True)
             GLib.timeout_add(200, lambda: (self.win.set_keep_above(False), False)[1])
         except Exception:
-            pass
+            soft_fail()
         return False
 
     def help_dialog(self, label):
@@ -1509,7 +1509,7 @@ class Panel:
             if hasattr(self, "status"):
                 self.status.set_text("现在：%s" % ("白色涂=加" if lum >= 0.5 else "黑色涂=擦"))
         except Exception:
-            pass
+            soft_fail()
 
     def on_close(self, *_):
         """Close only this panel. Never touches GIMP itself: hide at once, then clean up and leave
@@ -1520,7 +1520,7 @@ class Panel:
         try:
             save_geometry(self.win)
         except Exception:
-            pass
+            soft_fail()
         self.win.hide()
         GLib.idle_add(self._finish_close)
         return True          # we destroy the window ourselves in _finish_close
@@ -1530,15 +1530,15 @@ class Panel:
             try:
                 remove_previews(im)
             except Exception:
-                pass
+                soft_fail()
         try:
             Gimp.displays_flush()
         except Exception:
-            pass
+            soft_fail()
         try:
             self.win.destroy()
         except Exception:
-            pass
+            soft_fail()
         if Gtk.main_level() > 0:
             Gtk.main_quit()
         return False

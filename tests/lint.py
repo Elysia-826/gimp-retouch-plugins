@@ -20,6 +20,11 @@ for f in files + sorted(shipped - set(files)):
             if applies(f) and re.search(pat, line):
                 print("LINT %s:%d %s (%s)" % (f, n, line.strip(), why))
                 bad += 1
+for f in files:
+    text = open(os.path.join(repo, f), encoding="utf-8").read()
+    for m in re.finditer(r"except Exception:[ \t]*\n[ \t]*pass\b", text):
+        print("LINT %s:%d except Exception: pass (use soft_fail() from retouch_common)" % (f, text.count("\n", 0, m.start()) + 1))
+        bad += 1
 checked = ["retouch_common.py"] + files
 try:
     import pyflakes  # noqa: F401

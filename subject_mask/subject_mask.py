@@ -17,7 +17,7 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _cv2_launcher, _export_ppm, note_recorded, _NOWIN, require_one_layer, undo_group
+from retouch_common import _cv2_launcher, _export_ppm, note_recorded, _NOWIN, require_one_layer, soft_fail, undo_group
 
 PROC = "python-fu-subject-select"
 
@@ -172,6 +172,7 @@ def _drop_named(image, name):
     try:
         channels = image.get_channels()
     except Exception:
+        soft_fail()
         return
     for ch in channels or []:
         try:

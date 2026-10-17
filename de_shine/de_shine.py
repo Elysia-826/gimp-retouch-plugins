@@ -21,7 +21,7 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _bytes, _cv2_launcher, _export_ppm, _NOWIN, require_one_layer, undo_group
+from retouch_common import _bytes, _cv2_launcher, _export_ppm, _NOWIN, require_one_layer, soft_fail, undo_group
 
 PROC = "python-fu-de-shine"
 LAYER = "去油光"
@@ -201,14 +201,14 @@ def apply(image, layer, pro, strength, sens, soft, only_face, flash=False):
                 if hasattr(image, "set_selected_drawables"):
                     image.set_selected_drawables([bmask])
             except Exception:
-                pass
+                soft_fail()
             try:
                 if hasattr(bmask, "set_edit_mask"):
                     bmask.set_edit_mask(True)
                 else:
                     brush.set_edit_mask(True)
             except Exception:
-                pass
+                soft_fail()
             try:
                 Gimp.context_set_foreground(Gegl.Color.new("white"))
                 Gimp.context_set_background(Gegl.Color.new("black"))
@@ -217,7 +217,7 @@ def apply(image, layer, pro, strength, sens, soft, only_face, flash=False):
                 if hasattr(Gimp, "context_set_brush_hardness"):
                     Gimp.context_set_brush_hardness(0.0)
             except Exception:
-                pass
+                soft_fail()
         else:
             image.set_selected_layers([auto])
     Gimp.displays_flush()

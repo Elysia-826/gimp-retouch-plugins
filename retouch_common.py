@@ -1,6 +1,7 @@
 import contextlib
 import os
 import subprocess
+import sys
 
 from gi.repository import Gimp, Gegl, GLib
 
@@ -116,6 +117,19 @@ def _export_ppm(layer, path):
         f.write(raw)
 
 
+def soft_fail(what=None):
+    """Call inside an except block: log the error and go on; RETOUCH_STRICT=1 re-raises it."""
+    if os.environ.get("RETOUCH_STRICT") == "1":
+        raise
+    if what is None:
+        f = sys._getframe(1)
+        what = "%s:%d %s" % (os.path.basename(f.f_code.co_filename), f.f_lineno, f.f_code.co_name)
+    try:
+        print("[retouch] soft fail %s: %r" % (what, sys.exc_info()[1]), file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+
 def require_one_layer(procedure, drawables, message="请选择一个图层 / Select one layer"):
     """None when exactly one layer (groups count) is selected, else the CALLING_ERROR to return."""
     if len(drawables) == 1 and isinstance(drawables[0], Gimp.Layer):
@@ -160,7 +174,7 @@ def note_recorded(procedure, args, image=None, layer=None):
                 info = lmod.record_target(image, layer, procedure)
         mod.note_step(Gimp.directory() or "", procedure, args, info)
     except Exception:
-        return
+        soft_fail("note_recorded")
 
 
 @contextlib.contextmanager

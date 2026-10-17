@@ -7,7 +7,7 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import new_group, note_recorded, require_one_layer, set_drawables, undo_group
+from retouch_common import new_group, note_recorded, require_one_layer, set_drawables, soft_fail, undo_group
 
 PROC = "python-fu-fsep-oneclick"
 
@@ -129,7 +129,7 @@ def _add_help(dlg):
         box.reorder_child(lab, 0)
         lab.show()
     except Exception:
-        pass
+        soft_fail()
 
 
 class FSep(Gimp.PlugIn):

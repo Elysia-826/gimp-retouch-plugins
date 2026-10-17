@@ -11,7 +11,7 @@ gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
 from gi.repository import Gimp, GimpUi, GObject, GLib
 
-from retouch_common import set_drawables, undo_group
+from retouch_common import set_drawables, soft_fail, undo_group
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layers
@@ -40,7 +40,7 @@ def _status_ok(res):
         if st == Gimp.PDBStatusType.SUCCESS:
             return True
     except Exception:
-        pass
+        soft_fail()
     try:
         return int(st) == int(Gimp.PDBStatusType.SUCCESS)
     except Exception:
@@ -123,14 +123,14 @@ def _run_step(image, layer, step):
                 if res.length() > 1 and res.index(1) is not None:
                     detail = " " + str(res.index(1))
             except Exception:
-                pass
+                soft_fail()
             raise RuntimeError("播放失败 %s%s / Playback failed" % (name, detail))
     finally:
         if unhid:
             try:
                 target.set_visible(False)
             except Exception:
-                pass
+                soft_fail()
     return target
 
 

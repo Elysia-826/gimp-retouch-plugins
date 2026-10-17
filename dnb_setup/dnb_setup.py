@@ -7,7 +7,7 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import new_group, note_recorded, require_one_layer, undo_group
+from retouch_common import new_group, note_recorded, require_one_layer, soft_fail, undo_group
 
 PROC = "python-fu-dnb-setup"
 
@@ -105,7 +105,7 @@ def _paint_defaults(image):
         try:
             fn()
         except Exception:
-            pass
+            soft_fail()
 
 def run(procedure, run_mode, image, drawables, config, data):
     bad = require_one_layer(procedure, drawables, "Select exactly one layer / 请选择一个图层")

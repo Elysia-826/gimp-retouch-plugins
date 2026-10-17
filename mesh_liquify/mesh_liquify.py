@@ -10,7 +10,7 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _bytes, _cv2_launcher, _export_ppm, new_group, _NOWIN, require_one_layer, undo_group
+from retouch_common import _bytes, _cv2_launcher, _export_ppm, new_group, _NOWIN, require_one_layer, soft_fail, undo_group
 
 PROC = "python-fu-mesh-liquify"
 PROC_STROKE = "python-fu-mesh-liquify-stroke-layer"
@@ -1072,7 +1072,7 @@ def _dump_face(face, eye, jaw, nose):
         with open(os.path.join(tempfile.gettempdir(), "mesh-liquify-face-last.json"), "w", encoding="utf-8") as f:
             json.dump(payload, f)
     except Exception:
-        pass
+        soft_fail()
 
 def _detect_face(layer):
     here = os.path.dirname(os.path.abspath(__file__))

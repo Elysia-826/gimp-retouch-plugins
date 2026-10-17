@@ -17,7 +17,7 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _cv2_launcher, _export_ppm, note_recorded, _NOWIN, undo_group
+from retouch_common import _cv2_launcher, _export_ppm, note_recorded, _NOWIN, require_one_layer, undo_group
 
 PROC = "python-fu-subject-select"
 
@@ -208,9 +208,9 @@ def apply_selection(image, layer, mode, feather):
 
 
 def run(procedure, run_mode, image, drawables, config, data):
-    if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
-        return procedure.new_return_values(
-            Gimp.PDBStatusType.CALLING_ERROR, GLib.Error("请选择一个图层 / Select one layer"))
+    bad = require_one_layer(procedure, drawables)
+    if bad is not None:
+        return bad
     if run_mode == Gimp.RunMode.INTERACTIVE:
         GimpUi.init(PROC)
         dlg = GimpUi.ProcedureDialog.new(procedure, config, "选出主体 / Select Subject")

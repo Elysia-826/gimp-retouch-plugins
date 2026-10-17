@@ -7,7 +7,7 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import new_group, note_recorded, set_drawables, undo_group
+from retouch_common import new_group, note_recorded, require_one_layer, set_drawables, undo_group
 
 PROC = "python-fu-fsep-oneclick"
 
@@ -89,9 +89,9 @@ def separate(image, layer, radius):
     Gimp.displays_flush()
 
 def run(procedure, run_mode, image, drawables, config, data):
-    if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
-        return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
-            GLib.Error("Select exactly one layer / 请选择一个图层"))
+    bad = require_one_layer(procedure, drawables, "Select exactly one layer / 请选择一个图层")
+    if bad is not None:
+        return bad
     if config.get_property("radius") <= 0:
         config.set_property("radius", default_radius(image))
     if run_mode == Gimp.RunMode.INTERACTIVE:

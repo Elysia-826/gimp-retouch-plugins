@@ -2,7 +2,7 @@ import contextlib
 import os
 import subprocess
 
-from gi.repository import Gimp, Gegl
+from gi.repository import Gimp, Gegl, GLib
 
 HELPER_PY_FILE = "retouch-helper-python.txt"   # one line: full path of a python that has OpenCV
 _NOWIN = {"creationflags": 0x08000000} if os.name == "nt" else {}   # CREATE_NO_WINDOW: no console flash
@@ -114,6 +114,13 @@ def _export_ppm(layer, path):
     with open(path, "wb") as f:
         f.write(("P6\n%d %d\n255\n" % (w, h)).encode("ascii"))
         f.write(raw)
+
+
+def require_one_layer(procedure, drawables, message="请选择一个图层 / Select one layer"):
+    """None when exactly one layer (groups count) is selected, else the CALLING_ERROR to return."""
+    if len(drawables) == 1 and isinstance(drawables[0], Gimp.Layer):
+        return None
+    return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR, GLib.Error(message))
 
 
 def set_drawables(cfg, drawables):

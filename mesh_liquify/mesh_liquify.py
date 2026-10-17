@@ -10,7 +10,7 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _bytes, _cv2_launcher, _export_ppm, new_group, _NOWIN, undo_group
+from retouch_common import _bytes, _cv2_launcher, _export_ppm, new_group, _NOWIN, require_one_layer, undo_group
 
 PROC = "python-fu-mesh-liquify"
 PROC_STROKE = "python-fu-mesh-liquify-stroke-layer"
@@ -1474,9 +1474,9 @@ def face_adjust(image, layer, source, eye, jaw, nose, box, freeze_mode="none", f
     Gimp.displays_flush()
 
 def run_face(procedure, run_mode, image, drawables, config, data):
-    if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
-        return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
-            GLib.Error("Select exactly one layer / 请选择一个图层"))
+    bad = require_one_layer(procedure, drawables, "Select exactly one layer / 请选择一个图层")
+    if bad is not None:
+        return bad
     if run_mode == Gimp.RunMode.INTERACTIVE:
         GimpUi.init(PROC_FACE)
         dlg = GimpUi.ProcedureDialog.new(procedure, config, "按脸调整 / Face Adjust")
@@ -1502,9 +1502,9 @@ def run_face(procedure, run_mode, image, drawables, config, data):
     return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
 
 def run(procedure, run_mode, image, drawables, config, data):
-    if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
-        return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
-            GLib.Error("Select exactly one layer / 请选择一个图层"))
+    bad = require_one_layer(procedure, drawables, "Select exactly one layer / 请选择一个图层")
+    if bad is not None:
+        return bad
     if run_mode == Gimp.RunMode.INTERACTIVE:
         GimpUi.init(PROC)
         dlg = GimpUi.ProcedureDialog.new(procedure, config, "柔和液化 / Soft Mesh Liquify")
@@ -1569,9 +1569,9 @@ def step_stroke(image, layer, redo):
     Gimp.displays_flush()
 
 def run_step(procedure, run_mode, image, drawables, config, data):
-    if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
-        return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
-            GLib.Error("Select exactly one layer / 请选择一个图层"))
+    bad = require_one_layer(procedure, drawables, "Select exactly one layer / 请选择一个图层")
+    if bad is not None:
+        return bad
     try:
         step_stroke(image, drawables[0], bool(data))
     except Exception as e:
@@ -1586,9 +1586,9 @@ def run_redo_stroke(procedure, run_mode, image, drawables, config, data):
     return run_step(procedure, run_mode, image, drawables, config, True)
 
 def run_prepare_stroke(procedure, run_mode, image, drawables, config, data):
-    if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
-        return procedure.new_return_values(Gimp.PDBStatusType.CALLING_ERROR,
-            GLib.Error("Select exactly one layer / 请选择一个图层"))
+    bad = require_one_layer(procedure, drawables, "Select exactly one layer / 请选择一个图层")
+    if bad is not None:
+        return bad
     try:
         prepare_stroke_layer(image, drawables[0])
     except Exception as e:

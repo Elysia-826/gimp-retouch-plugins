@@ -14,7 +14,7 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _bytes, undo_group
+from retouch_common import _bytes, require_one_layer, undo_group
 
 PROC = "python-fu-dnb-flow"
 
@@ -135,9 +135,9 @@ def apply_stroke(image, layer, mode, x1, y1, x2, y2, radius, flow, opacity, hard
 
 
 def run(procedure, run_mode, image, drawables, config, data):
-    if len(drawables) != 1 or not isinstance(drawables[0], Gimp.Layer):
-        return procedure.new_return_values(
-            Gimp.PDBStatusType.CALLING_ERROR, GLib.Error("请选择一个图层 / Select one layer"))
+    bad = require_one_layer(procedure, drawables)
+    if bad is not None:
+        return bad
     if run_mode == Gimp.RunMode.INTERACTIVE:
         GimpUi.init(PROC)
         dlg = GimpUi.ProcedureDialog.new(procedure, config, "轻柔涂抹 / Gentle D&B Stroke")

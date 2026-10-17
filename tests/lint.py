@@ -11,6 +11,7 @@ for row in open(os.path.join(repo, "bundle.lock"), encoding="utf-8"):
 rules = [(r"undo_group_(start|end)\(", "use `with undo_group(image):` from retouch_common", lambda f: f != "retouch_common.py"),
          (r"^def (_bytes|_python_candidates|_helper_env|_cv2_launcher|_export_ppm|_?note_recorded|undo_group|set_drawables|new_group)\(|set_core_object_array|GroupLayer\.new|group_new\(",
           "use the copy in retouch_common", lambda f: f != "retouch_common.py"),
+         (r"len\(drawables\) != 1", "use require_one_layer from retouch_common", lambda f: f != "retouch_common.py"),
          (r"/home/box|/workspace|/tmp/", "no machine paths in shipped code; use an env var or tempfile", lambda f: f in shipped)]
 bad = 0
 for f in files + sorted(shipped - set(files)):

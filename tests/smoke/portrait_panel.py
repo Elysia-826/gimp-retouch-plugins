@@ -52,4 +52,12 @@ for l in [l for l in walk(img.get_layers()) if not l.is_group() and l.get_mask()
     m = l.get_mask()
     if max(bytes(m.get_buffer().get(Gegl.Rectangle.new(0, 0, m.get_width(), m.get_height()), 1.0, "Y u8", Gegl.AbyssPolicy.NONE))) != 0:
         die("mask of %s is not black" % l.get_name())
+n0 = len(tree(img))
+for l in walk(img.get_layers()):
+    l.set_name("改名 " + l.get_name())
+again = pp.build_workspace(img, "ws:dnb")
+ok("renamed, ws:dnb again -> %s" % again)
+if len(tree(img)) != n0 or not pp.start_retouch(img).startswith("已经开始过了"):
+    show(img)
+    die("renamed layers were not found by role")
 ok("OK")

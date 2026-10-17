@@ -64,6 +64,7 @@ for p in $PLUGINS; do
         smoke $p SMOKE_FACE=$FACE
         gc portrait_panel-help "exec(open('tests/portrait_panel/test_help.py').read(), {'__name__': 't'})"; check $p portrait_panel-help "HELP ALL OK"
         if [ $GUI = 1 ]; then PP_TEST_IMAGE=$FACE sh tests/portrait_panel/gui_close_xvfb.sh :97 > "$L/portrait_panel-gui.log" 2>&1; check $p portrait_panel-gui "GUI CLOSE OK"
+            bash tests/portrait_panel/gui_undo_xvfb.sh :95 "$FACE" > "$L/portrait_panel-gui-undo.log" 2>&1; check $p portrait_panel-gui-undo "GUI_PP OK"
         else NOTE[$p]="GUI skipped (missing:$NOGUI)"; fi ;;
     *) smoke $p ;;
     esac

@@ -5,6 +5,7 @@
 # runs an existing plug-in procedure by PDB name; tools that are not installed
 # or not built yet are greyed out. The plug-in process keeps running until the
 # window is closed. Buttons + 开始修图 + group helper.
+import contextlib
 import json
 import traceback
 import socket
@@ -181,12 +182,12 @@ def _working_layer(image):
     """The photo: top-level pixel layer that is not the locked backup."""
     for l in image.get_layers():
         try:
-            if not l.is_group() and l.get_name() != BACKUP_NAME and l.get_visible():
+            if not l.is_group() and not is_role(l, BACKUP_NAME) and l.get_visible():
                 return l
         except Exception:
             continue
     for l in image.get_layers():
-        if not l.is_group() and l.get_name() != BACKUP_NAME:
+        if not l.is_group() and not is_role(l, BACKUP_NAME):
             return l
     return None
 
@@ -209,21 +210,17 @@ def _in_image(image, item):
 
 
 def _rank_of(item):
-    try:
-        n = item.get_name()
-    except Exception:
-        return None
     for k, v in WS_NAMES.items():
-        if n == v:
-            return WS[k][1]
+        try:
+            if is_role(item, v):
+                return WS[k][1]
+        except Exception:
+            return None
     return None
 
 
 def _find_child(group, name):
-    for c in group.get_children():
-        if c.get_name() == name:
-            return c
-    return None
+    return find_by_role(group.get_children(), name)
 
 
 def _new_group(image, name):
@@ -321,8 +318,7 @@ def set_eye_strengths(vals, image=None):
                 sg = _find_child(eg, sub)
                 if sg is not None:
                     for c in sg.get_children():
-                        n = c.get_name()
-                        if n == EYE_LIFT_NAMES[key] or n.startswith("提亮"):
+                        if is_role(c, EYE_LIFT_NAMES[key]) or (_role(c) is None and c.get_name().startswith("提亮")):
                             c.set_opacity(float(vals[key]))
             Gimp.displays_flush()
 
@@ -335,7 +331,7 @@ def build_eye(image, top, rank):
         return "请先框选眼睛（用椭圆或套索选区圈住眼睛），再点“眼部修饰”。"
     st = eye_strengths()
     _ok, _non, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
-    with undo_group(image):
+    with _op(image):
         eg = _new_group(image, WS_NAMES["ws:eye"])
         _insert_ranked(image, top, eg, rank)
         subs = {}
@@ -423,7 +419,7 @@ def _apply_dered(image, vals):
     if g is None:
         return
     for c in (g.get_children() if g.is_group() else [g]):
-        if c.get_name() == DERED_LAYER:
+        if is_role(c, DERED_LAYER):
             c.set_opacity(float(vals["dered"]))
     Gimp.displays_flush()
 
@@ -442,7 +438,7 @@ def _apply_unify(image, vals):
     if g is None:
         return
     for c in (g.get_children() if g.is_group() else [g]):
-        if c.get_name() == UNIFY_LAYER:
+        if is_role(c, UNIFY_LAYER):
             c.set_opacity(float(vals["unify"]))
     Gimp.displays_flush()
 
@@ -465,7 +461,7 @@ def _apply_under(image, vals):
         return
     for c in ug.get_children():
         for key, nm in UNDER_NAMES.items():
-            if c.get_name() == nm:
+            if is_role(c, nm):
                 c.set_opacity(st[key])
     Gimp.displays_flush()
 
@@ -487,7 +483,7 @@ def _apply_teeth(image, vals):
         return
     for c in tg.get_children():
         for key, nm in TEETH_NAMES.items():
-            if c.get_name() == nm:
+            if is_role(c, nm):
                 c.set_opacity(st[key])
     Gimp.displays_flush()
 
@@ -609,11 +605,11 @@ def _copy_mask(image, src_layer, dst_layer):
 def sharpen_oneclick(image):
     """一键锐化: sharpen the selection (whole image if none). Mask = selection, still paintable.
     Replaces an existing sharpen layer (its pixels are re-made from the current image)."""
-    if not any(l.get_name() == BACKUP_NAME for l in image.get_layers()):
+    if not any(is_role(l, BACKUP_NAME) for l in image.get_layers()):
         start_retouch(image)
     st = sharpen_settings()
     sel = not Gimp.Selection.is_empty(image)
-    with undo_group(image):
+    with _op(image):
         top = ensure_group(image)
         old = find_sharpen(image)
         lay = _sharpen_snapshot(image, st)
@@ -638,7 +634,7 @@ def sharpen_refresh(image):
         return "还没有锐化层。先点“涂抹锐化”或“一键锐化”。"
     st = sharpen_settings()
     st["opacity"] = old.get_opacity()
-    with undo_group(image):
+    with _op(image):
         lay = _sharpen_snapshot(image, st)
         parent = old.get_parent()
         pos = image.get_item_position(old)
@@ -657,7 +653,7 @@ def build_sharpen(image, top, rank):
     """锐化: snapshot of current visible + non-destructive USM + black mask (paint white to sharpen).
     Lives in “最后”; captures whatever is below so earlier edits stay in the sharpen look."""
     st = sharpen_settings()
-    with undo_group(image):
+    with _op(image):
         lay = _sharpen_snapshot(image, st)
         _insert_ranked(image, top, lay, rank)
         _black_mask(lay)
@@ -672,7 +668,7 @@ def build_sharpen(image, top, rank):
 def build_dered(image, top, rank):
     """皮肤减红: grey LCh Chroma (no HSV brightening). Black mask, paint white to reduce red."""
     st = dered_strength()
-    with undo_group(image):
+    with _op(image):
         g = _new_group(image, WS_NAMES["ws:dered"])
         _insert_ranked(image, top, g, rank)
         lay = _solid_layer(image, DERED_LAYER, "#808080", Gimp.LayerMode.LCH_CHROMA, st)
@@ -688,7 +684,7 @@ def build_dered(image, top, rank):
 def build_unify(image, top, rank):
     """统一肤色: solid mid-skin in LCh Color — gentle hue/chroma pull, keeps L and texture."""
     st = unify_strength()
-    with undo_group(image):
+    with _op(image):
         g = _new_group(image, WS_NAMES["ws:unify"])
         _insert_ranked(image, top, g, rank)
         lay = _solid_layer(image, UNIFY_LAYER, UNIFY_COLOR, Gimp.LayerMode.LCH_COLOR, st)
@@ -704,7 +700,7 @@ def build_unify(image, top, rank):
 def build_undereye(image, top, rank):
     """卧蚕压色: black soft-light darken + grey LCh chroma. User paints; no selection required."""
     st = under_strengths()
-    with undo_group(image):
+    with _op(image):
         g = _new_group(image, WS_NAMES["ws:undereye"])
         _insert_ranked(image, top, g, rank)
         chroma = _solid_layer(image, UNDER_NAMES["chroma"], "#808080",
@@ -729,7 +725,7 @@ def build_teeth(image, top, rank):
         return "请先框选牙齿（用椭圆或套索圈住牙齿），再点“牙齿美白”。"
     st = teeth_strengths()
     _ok, _non, x1, y1, x2, y2 = Gimp.Selection.bounds(image)
-    with undo_group(image):
+    with _op(image):
         g = _new_group(image, WS_NAMES["ws:teeth"])
         _insert_ranked(image, top, g, rank)
         chroma = _solid_layer(image, TEETH_NAMES["chroma"], "#808080",
@@ -763,7 +759,7 @@ def build_deshine(image, top, rank, title):
     except Exception:
         image.remove_layer(vis)
         raise
-    with undo_group(image):
+    with _op(image):
         made = {l.get_name(): l for l in image.get_layers() if l.get_name() in ("去油光", "去油光画笔")}
         corr = made.get("去油光画笔")
         if corr is None:
@@ -806,7 +802,7 @@ def build_deshine(image, top, rank, title):
 def build_workspace(image, key):
     """Build one skin workspace inside 插件改动. Returns a status line."""
     remove_previews(image)   # never merged into 去油光, never left in the stack
-    if not any(l.get_name() == BACKUP_NAME for l in image.get_layers()):
+    if not any(is_role(l, BACKUP_NAME) for l in image.get_layers()):
         start_retouch(image)
     top = ensure_group(image)
     title = WS_NAMES[key]
@@ -858,7 +854,7 @@ def build_workspace(image, key):
         _run_noninteractive("python-fu-fsep-oneclick", image, photo, radius=0.0)
     if key == "ws:deshine":
         return build_deshine(image, top, rank, title)
-    with undo_group(image):
+    with _op(image):
         notes = []
         if key == "ws:heal":
             lay = Gimp.Layer.new(image, title, image.get_width(), image.get_height(),
@@ -934,6 +930,61 @@ def build_workspace(image, key):
 
 
 PREVIEW_NAME = "蒙版预览（再点一下关闭）"
+
+
+ROLE_KEY = "retouch-role"
+
+
+def _roles():
+    r = {GROUP_NAME: "group", BACKUP_NAME: "backup", PREVIEW_NAME: "preview", EYE_WHITE: "eye-white", EYE_IRIS: "eye-iris",
+         DERED_LAYER: "dered", UNIFY_LAYER: "unify"}
+    r.update({v: k for k, v in WS_NAMES.items()})
+    r.update({v: "eye-lift-" + k for k, v in EYE_LIFT_NAMES.items()})
+    r.update({v: "under-" + k for k, v in UNDER_NAMES.items()})
+    r.update({v: "teeth-" + k for k, v in TEETH_NAMES.items()})
+    return r
+
+
+def _role(item):
+    p = item.get_image().get_parasite("%s:%d" % (ROLE_KEY, item.get_tattoo()))
+    return bytes(p.get_data()).decode("utf-8") if p is not None else None
+
+
+def is_role(item, name):
+    """Our layer for this name: its role tag, or (older files, not tagged yet) the name."""
+    r = _role(item)
+    if r is None:
+        return item.get_name() == name
+    return r == _roles()[name]
+
+
+def find_by_role(items, name):
+    for c in items:
+        if is_role(c, name):
+            return c
+    return None
+
+
+def tag_roles(image):
+    """Tag our layers by role (image parasite keyed by tattoo, like mesh_liquify), so a rename does not lose them."""
+    roles = _roles()
+    flags = int(Gimp.PARASITE_PERSISTENT) | int(Gimp.PARASITE_UNDOABLE)
+
+    def walk(items, deep):
+        for l in items:
+            if _role(l) is None and l.get_name() in roles:
+                image.attach_parasite(Gimp.Parasite.new("%s:%d" % (ROLE_KEY, l.get_tattoo()), flags, roles[l.get_name()].encode("utf-8")))
+            if l.is_group() and (deep or is_role(l, GROUP_NAME)):
+                walk(l.get_children(), True)
+
+    walk(image.get_layers(), False)
+
+
+@contextlib.contextmanager
+def _op(image):
+    with undo_group(image):
+        yield
+        tag_roles(image)
 _preview_src = {}   # image id -> layer id whose mask is previewed
 
 
@@ -941,7 +992,7 @@ def remove_previews(image):
     n = 0
     for l in list(image.get_layers()):
         try:
-            if l.get_name() == PREVIEW_NAME:
+            if is_role(l, PREVIEW_NAME):
                 image.remove_layer(l)
                 n += 1
         except Exception:
@@ -967,7 +1018,7 @@ def toggle_preview(image):
     _ok, ox, oy = src.get_offsets()
     w, h = m.get_width(), m.get_height()
     data = bytes(m.get_buffer().get(Gegl.Rectangle.new(0, 0, w, h), 1.0, "Y u8", Gegl.AbyssPolicy.NONE))
-    with undo_group(image):
+    with _op(image):
         pv = _solid_layer(image, PREVIEW_NAME, "#ff2020", Gimp.LayerMode.NORMAL, 50.0)
         image.insert_layer(pv, None, 0)
         pm = pv.create_mask(Gimp.AddMaskType.BLACK)
@@ -985,7 +1036,7 @@ def toggle_preview(image):
 def find_group(image):
     for l in image.get_layers():
         try:
-            if l.is_group() and l.get_name() == GROUP_NAME:
+            if l.is_group() and is_role(l, GROUP_NAME):
                 return l
         except Exception:
             continue
@@ -1006,7 +1057,7 @@ def ensure_group(image):
 
 
 def _photo_layer(image):
-    sel = [l for l in image.get_selected_layers() if not l.is_group() and l.get_name() != BACKUP_NAME]
+    sel = [l for l in image.get_selected_layers() if not l.is_group() and not is_role(l, BACKUP_NAME)]
     if sel:
         return sel[0]
     for l in reversed(image.get_layers()):
@@ -1019,13 +1070,13 @@ def start_retouch(image):
     """Copy the photo as a locked, hidden backup at the bottom; create the group.
     The photo layer itself stays as is and remains the working layer."""
     for l in image.get_layers():
-        if l.get_name() == BACKUP_NAME:
+        if is_role(l, BACKUP_NAME):
             ensure_group(image)
             return "已经开始过了：原图备份和“插件改动”组都在。"
     photo = _photo_layer(image)
     if photo is None:
         raise RuntimeError("这张图里没有可用的图层")
-    with undo_group(image):
+    with _op(image):
         bak = photo.copy()
         bak.set_name(BACKUP_NAME)
         image.insert_layer(bak, None, len(image.get_layers()))

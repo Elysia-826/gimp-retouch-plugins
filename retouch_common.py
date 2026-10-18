@@ -130,6 +130,13 @@ def soft_fail(what=None):
         pass
 
 
+def add_menu_unless_panel(procedure):
+    """Same button in 人像面板: no menu entry when the panel is installed next to this plug-in."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.exists(os.path.join(here, "..", "portrait_panel", "portrait_panel.py")):
+        procedure.add_menu_path("<Image>/Filters/修图工具/")
+
+
 GROUP_MESSAGE = "请选择一个普通图层，不要选图层组 / Select a normal layer, not a layer group"
 
 

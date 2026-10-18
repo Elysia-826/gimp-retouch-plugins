@@ -13,7 +13,7 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _bytes, require_one_layer, set_drawables, undo_group
+from retouch_common import add_menu_unless_panel, _bytes, require_one_layer, set_drawables, undo_group
 
 PROC = "python-fu-spot-heal"
 
@@ -294,7 +294,7 @@ class SpotHeal(Gimp.PlugIn):
         p.set_image_types("RGB*, GRAY*")
         p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
         p.set_menu_label("点修复 / Spot Heal")
-        p.add_menu_path("<Image>/Filters/修图工具/")
+        add_menu_unless_panel(p)
         p.set_documentation(
             "Heal a small spot from the surrounding texture. Thin lines and hard edges inside the spot are kept. 点掉小斑，细线和硬边会留着。",
             "The dialog cannot receive a click on the photo. Type the spot in layer pixels. Up to three points, one undo step. "

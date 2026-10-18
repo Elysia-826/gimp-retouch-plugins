@@ -1,6 +1,6 @@
 # 一键频率分离 / One-click Frequency Separation (GIMP 3.0.4 + 3.2.6)
 
-Menu: **Filters > 修图工具 > 一键频率分离 / One-click Frequency Separation**
+Menu: **Filters > 修图工具 > 一键频率分离 / One-click Frequency Separation**（装了人像面板时，菜单里不再单独显示，在人像面板「高低频」旁边的 ⚙里。）
 PDB name: `python-fu-fsep-oneclick` (args: run-mode, image, drawables, radius; radius 0 = auto)
 
 Result (top -> bottom):

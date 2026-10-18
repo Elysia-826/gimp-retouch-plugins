@@ -11,7 +11,7 @@ gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
 from gi.repository import Gimp, GimpUi, GObject, GLib
 
-from retouch_common import require_one_layer, set_drawables, soft_fail, undo_group
+from retouch_common import add_menu_unless_panel, require_one_layer, set_drawables, soft_fail, undo_group
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layers
@@ -230,7 +230,10 @@ class ActionRecord(Gimp.PlugIn):
                 "Saved action name, or the built-in 自然修图准备",
                 "自然修图准备", F,
             )
-        p.add_menu_path("<Image>/Filters/修图工具/")
+        if name == PLAY:
+            add_menu_unless_panel(p)
+        else:
+            p.add_menu_path("<Image>/Filters/修图工具/")
         return p
 
 

@@ -1,6 +1,6 @@
 # 人像笔刷 / portrait_brush（尚未人工验证）
 
-菜单：滤镜 › 修图工具 › 「人像笔刷 / Portrait Brushes」（`python-fu-portrait-brush`）。GIMP 3.0.4 和 3.2.6 都能用。
+菜单：滤镜 › 修图工具 › 「人像笔刷 / Portrait Brushes」（`python-fu-portrait-brush`）。GIMP 3.0.4 和 3.2.6 都能用。（装了人像面板时，菜单里不再单独显示，在人像面板的「设好笔刷」里。）
 
 ## 笔刷（自制，MIT）
 

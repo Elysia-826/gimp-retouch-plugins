@@ -14,7 +14,7 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _bytes, require_one_layer, undo_group
+from retouch_common import add_menu_unless_panel, _bytes, require_one_layer, undo_group
 
 PROC = "python-fu-dnb-flow"
 
@@ -175,7 +175,7 @@ class DnbFlow(Gimp.PlugIn):
         p.set_image_types("RGB*, GRAY*")
         p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
         p.set_menu_label("轻柔涂抹 / Gentle D&B Stroke")
-        p.add_menu_path("<Image>/Filters/修图工具/")
+        add_menu_unless_panel(p)
         p.set_documentation(
             "One soft dodge or burn stroke on the grey overlay. Flow builds within the stroke; opacity is the cap. 在灰色加深减淡层上涂一笔。流量是这一笔叠多快，不透明度是这一笔的上限。",
             "Does not read a tablet. Leave pressure at -1 so it is not a third multiplier. "

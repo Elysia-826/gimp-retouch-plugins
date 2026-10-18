@@ -17,7 +17,7 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _cv2_launcher, _export_ppm, note_recorded, _NOWIN, require_one_layer, soft_fail, undo_group
+from retouch_common import add_menu_unless_panel, _cv2_launcher, _export_ppm, note_recorded, _NOWIN, require_one_layer, soft_fail, undo_group
 
 PROC = "python-fu-subject-select"
 
@@ -246,7 +246,7 @@ class SubjectMask(Gimp.PlugIn):
         p.set_image_types("RGB*")
         p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
         p.set_menu_label("选出主体 / Select Subject")
-        p.add_menu_path("<Image>/Filters/修图工具/")
+        add_menu_unless_panel(p)
         p.set_documentation(
             "Select the person, or face skin only. Edge is feathered a little. 选出人或脸部皮肤，边缘略虚。",
             "Not a hair matte: stray hairs are only a short dark-pixel expansion from the silhouette. "

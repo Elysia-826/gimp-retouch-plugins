@@ -21,7 +21,7 @@ gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _bytes, _cv2_launcher, _export_ppm, _NOWIN, require_one_layer, soft_fail, undo_group
+from retouch_common import add_menu_unless_panel, _bytes, _cv2_launcher, _export_ppm, _NOWIN, require_one_layer, soft_fail, undo_group
 
 PROC = "python-fu-de-shine"
 LAYER = "去油光"
@@ -260,7 +260,7 @@ class DeShine(Gimp.PlugIn):
         p.set_image_types("RGB*")
         p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
         p.set_menu_label("去油光 / De-shine")
-        p.add_menu_path("<Image>/Filters/修图工具/")
+        add_menu_unless_panel(p)
         p.set_documentation(
             "Tone down oily shine on skin, keep the texture. 压掉皮肤油光，保留纹理。",
             "Result goes on a new layer with a mask; the photo is not changed. Beginner: one layer, "

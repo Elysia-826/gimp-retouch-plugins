@@ -6,6 +6,7 @@
 # The brushes themselves are files in <GIMP config>/brushes/portrait-retouch/
 # (made by make_brushes.py from a fixed seed, MIT).
 # No numpy. No DrawableFilter. Only libgimp calls that exist in 3.0.4.
+import os
 import sys
 import gi
 
@@ -117,7 +118,8 @@ class PortraitBrush(Gimp.PlugIn):
                                | Gimp.ProcedureSensitivityMask.DRAWABLES
                                | Gimp.ProcedureSensitivityMask.NO_DRAWABLES)
         p.set_menu_label("人像笔刷 / Portrait Brushes")
-        p.add_menu_path("<Image>/Filters/修图工具/")
+        if not os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "portrait_panel", "portrait_panel.py")):
+            p.add_menu_path("<Image>/Filters/修图工具/")
         p.set_documentation(
             "Set brush, size, low opacity and soft dynamics for one retouch job. Paints nothing. "
             "设置笔刷、大小、低不透明度和柔和动态，用于一项修图工作。不会画任何东西。",

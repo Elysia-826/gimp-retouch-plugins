@@ -10,7 +10,7 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import _bytes, _cv2_launcher, _export_ppm, new_group, _NOWIN, require_one_layer, soft_fail, undo_group
+from retouch_common import add_menu_unless_panel, _bytes, _cv2_launcher, _export_ppm, new_group, _NOWIN, require_one_layer, soft_fail, undo_group
 
 PROC = "python-fu-mesh-liquify"
 PROC_STROKE = "python-fu-mesh-liquify-stroke-layer"
@@ -1620,7 +1620,7 @@ class MeshLiquify(Gimp.PlugIn):
         p.set_image_types("RGB*, GRAY*")
         p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
         p.set_menu_label("按脸调整 / Face Adjust")
-        p.add_menu_path("<Image>/Filters/修图工具/")
+        add_menu_unless_panel(p)
         p.set_documentation(
             "Eye size (+ = larger), jaw (+ = narrower) and nose width (+ = narrower) on one face, using the same mesh liquify. 在一张脸上改眼睛大小（正数变大）、下颌宽窄（正数变窄）、鼻翼宽窄（正数变窄）。",
             "Auto uses YuNet (five points: two eyes, nose tip, two mouth corners) via the host Python OpenCV. "
@@ -1697,7 +1697,7 @@ class MeshLiquify(Gimp.PlugIn):
         p.set_image_types("RGB*, GRAY*")
         p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
         p.set_menu_label("柔和液化 / Soft Mesh Liquify")
-        p.add_menu_path("<Image>/Filters/修图工具/")
+        add_menu_unless_panel(p)
         p.set_documentation(
             "Soft mesh liquify: push along a stroke, bloat, pinch, twirl, or restore toward the original. 柔和网格液化。",
             "One call is one brush dab or one straight stroke. Edges fall off smoothly (no hard crease). "

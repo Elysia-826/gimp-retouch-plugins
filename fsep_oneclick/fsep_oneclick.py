@@ -7,7 +7,7 @@ gi.require_version('GimpUi', '3.0')
 gi.require_version('Gegl', '0.4')
 from gi.repository import Gimp, GimpUi, GObject, GLib, Gegl
 
-from retouch_common import new_group, note_recorded, require_one_layer, set_drawables, soft_fail, undo_group
+from retouch_common import add_menu_unless_panel, new_group, note_recorded, require_one_layer, set_drawables, soft_fail, undo_group
 
 PROC = "python-fu-fsep-oneclick"
 
@@ -143,7 +143,7 @@ class FSep(Gimp.PlugIn):
         p.set_image_types("RGB*, GRAY*")
         p.set_sensitivity_mask(Gimp.ProcedureSensitivityMask.DRAWABLE)
         p.set_menu_label("一键频率分离 / One-click Frequency Separation")
-        p.add_menu_path("<Image>/Filters/修图工具/")
+        add_menu_unless_panel(p)
         p.set_documentation("Split layer into Low (blur) and High (grain-merge texture) layers in a group. 将图层分离为低频与高频。",
                             "Original layer is hidden and kept untouched below the group. Radius 0 = auto: 6 px * long side / 4000, clamped 2..30.", name)
         p.set_attribution("Elysia", "Elysia", "2026")

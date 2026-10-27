@@ -98,16 +98,59 @@ def main():
     selfie = "/workspace/retouch-trial/before.jpg"
     if os.path.isfile(selfie):
         info3, data3 = run_subject(selfie, True)
-        if not info3.get("ok") or info3.get("note") != "seg-mnv3s":
-            die("selfie seg failed: %s" % info3)
+        if not info3.get("ok"):
+            die("selfie not ok: %s" % info3)
+        note3 = info3.get("note")
+        # Half-body selfie: shoulder-cut seg must fall back; good seg may stay.
+        if note3 not in ("seg-mnv3s", "grabcut-plus-dark-edge"):
+            die("selfie unexpected note: %s" % info3)
+        if not info3.get("face"):
+            die("selfie needs face for cover check: %s" % info3)
         w3, h3, raw3 = data3
-        vals3 = memoryview(raw3)
-        face = vals3[(h3 // 5) * w3 + (w3 // 2)]
-        corner = vals3[4 * w3 + 4]
-        frac3 = sum(1 for v in vals3 if v > 127) / float(len(vals3))
-        print("SEG_HELPER selfie face=%d corner=%d frac=%.3f" % (face, corner, frac3), flush=True)
-        if face < 128 or corner > 64:
+        mask = memoryview(raw3)
+        mid = mask[(h3 // 5) * w3 + (w3 // 2)]
+        corner = mask[4 * w3 + 4]
+        frac3 = sum(1 for v in mask if v > 127) / float(len(mask))
+        if mid < 128 or corner > 64:
             die("selfie mask not person-shaped")
+        if not info3.get("face") or "box" not in info3:
+            die("selfie needs face box for cover check")
+        bx, by, bw, bh = info3["box"]
+        x0 = max(0, int(bx - 0.8 * bw))
+        x1 = min(w3, int(bx + bw + 0.8 * bw))
+        y0 = max(0, int(by))
+        y1 = min(h3, int(by + bh + 1.75 * bh))
+        cx = int(bx + 0.5 * bw)
+        mid_y0 = min(h3 - 1, max(0, int(by + bh)))
+        mid_y1 = min(h3, int(by + bh + 1.5 * bh))
+
+        def band_cover(y_a, y_b, x_a, x_b):
+            if y_b <= y_a or x_b <= x_a:
+                return 0.0
+            total = 0
+            hit = 0
+            for y in range(y_a, y_b):
+                row = y * w3
+                for x in range(x_a, x_b):
+                    total += 1
+                    if mask[row + x] > 127:
+                        hit += 1
+            return hit / float(total) if total else 0.0
+
+        torso = band_cover(y0, y1, x0, x1)
+        left = band_cover(mid_y0, mid_y1, x0, cx)
+        right = band_cover(mid_y0, mid_y1, cx, x1)
+        print(
+            "SEG_HELPER selfie note=%s face=%d corner=%d frac=%.3f "
+            "torso=%.3f L=%.3f R=%.3f" % (
+                note3, mid, corner, frac3, torso, left, right),
+            flush=True)
+        if torso < 0.70:
+            die("selfie torso cover too low: %.3f" % torso)
+        if min(left, right) < 0.70:
+            die("selfie shoulder imbalance L=%.3f R=%.3f" % (left, right))
+        if abs(left - right) > 0.25:
+            die("selfie L/R gap too big: %.3f" % abs(left - right))
 
     print("SEG_HELPER OK", flush=True)
 

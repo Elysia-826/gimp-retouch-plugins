@@ -266,6 +266,42 @@ def _seg_model_path():
     return None
 
 
+def _seg_face_cover_ok(mask, face):
+    """False when the person mask has a shoulder-scale hole under the face box.
+
+    Checks the expected torso band (face down ~1.75 face-heights, ±0.8
+    face-widths) and left/right cover just below the face. A half-body cut
+    fails the side balance even when the global fraction looks fine.
+    """
+    h, w = mask.shape[:2]
+    bx, by, bw, bh = face["box"]
+    x0 = max(0, int(bx - 0.8 * bw))
+    x1 = min(w, int(bx + bw + 0.8 * bw))
+    y0 = max(0, int(by))
+    y1 = min(h, int(by + bh + 1.75 * bh))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return True
+    band = mask[y0:y1, x0:x1]
+    if float((band > 127).mean()) < 0.55:
+        return False
+    cx = int(bx + 0.5 * bw)
+    mid_y0 = min(h - 1, max(0, int(by + bh)))
+    mid_y1 = min(h, int(by + bh + 1.5 * bh))
+    if mid_y1 - mid_y0 < 8:
+        return True
+    left = mask[mid_y0:mid_y1, x0:cx]
+    right = mask[mid_y0:mid_y1, cx:x1]
+    if left.size < 64 or right.size < 64:
+        return True
+    lc = float((left > 127).mean())
+    rc = float((right > 127).mean())
+    if max(lc, rc) >= 0.70 and min(lc, rc) < 0.55:
+        return False
+    if abs(lc - rc) > 0.35 and min(lc, rc) < 0.60:
+        return False
+    return True
+
+
 def _subject_from_seg(img, model):
     """Person mask from the bundled MobileNetV3-Small LR-ASPP ONNX via cv2.dnn.
 
@@ -495,6 +531,8 @@ def main():
                 mask, note = _subject_from_seg(img, seg)
             except Exception:
                 mask, note = None, "seg-fail"
+            if mask is not None and face is not None and not _seg_face_cover_ok(mask, face):
+                mask, note = None, "seg-face-cover"
         if mask is None:
             if face is not None:
                 mask = _subject_from_face(img, face)

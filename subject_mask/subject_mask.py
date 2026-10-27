@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # 选出主体 / Select subject   (GIMP 3.0.x and 3.2.x)
 # One plugin, two modes: the person, or face skin only.
-# The edge is GrabCut or border color, plus a short dark-pixel expansion.
+# Subject prefers bundled seg_mnv3s.onnx; falls back to GrabCut / border color.
 # That is not a hair matte. No numpy here. No DrawableFilter.
 # OpenCV runs in a host Python helper, same idea as mesh_liquify's face helper.
 import os
@@ -249,8 +249,8 @@ class SubjectMask(Gimp.PlugIn):
         add_menu_unless_panel(p)
         p.set_documentation(
             "Select the person, or face skin only. Edge is feathered a little. 选出人或脸部皮肤，边缘略虚。",
-            "Not a hair matte: stray hairs are only a short dark-pixel expansion from the silhouette. "
-            "Backlit hair can still be cut off. Skin mode needs the YuNet model shipped with mesh_liquify. "
+            "Subject uses the bundled person segmentation ONNX when present, else GrabCut / border color. "
+            "Not a hair matte. Skin mode needs the YuNet model shipped with mesh_liquify. "
             "Eyes and the mouth are punched out of the skin selection when a face is found. "
             "Not verified by hand. 尚未人工验证。不是发丝抠图。",
             name,

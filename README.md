@@ -10,7 +10,7 @@ GIMP 3 (3.0 / 3.2) Python 插件集，跨 Linux / Windows。
 - `mesh_liquify` — 柔和网格液化（尚未人工验证）：推移、膨胀、收缩、旋转、还原，可用冻结蒙版保护不该动的区域。对话框里不能在照片上拖；先「准备液化笔触」，用 GIMP 自己的画笔画线，再沿这条线推移。横线默认从左往右；勾「反向」改成往左。可用「撤销上一笔液化 / 重做上一笔液化」一笔笔退回（不删隐藏组）。另有「按脸调整」：自动认脸或手动画框，滑眼睛、下颌、鼻宽（尚未人工验证）。详见 `mesh_liquify/README.md`
 - `spot_heal` — 点修复（尚未人工验证）：填一个点的坐标，用周围纹理补掉小斑。细线会留着，点在细线上且没有更大的斑就不涂。详见 `spot_heal/README.md`
 - `dnb_flow` — 轻柔涂抹（尚未人工验证）：在 50% 灰柔光层上走笔。流量决定这一笔叠多快，不透明度是上限，读不到笔压。详见 `dnb_flow/README.md`
-- `subject_mask` — 选出主体（尚未人工验证）：把人或脸部皮肤做成选区，边缘略虚。不是发丝抠图。皮肤模式会躲开眼睛和嘴。详见 `subject_mask/README.md`
+- `subject_mask` — 选出主体（尚未人工验证）：把人或脸部皮肤做成选区，边缘略虚。主体优先用自带 `seg_mnv3s.onnx`（VideoMatte MIT + SkyFinder CC-BY 训练），失败再回退 GrabCut。不是发丝抠图。皮肤模式会躲开眼睛和嘴。详见 `subject_mask/README.md`
 - `de_shine` — 去油光（尚未人工验证）：自动找出脸上又亮又偏白的油光，只压低频的亮度和颜色，往周围肤色靠，毛孔纹理保留。结果放在新图层「去油光」上，带蒙版，原图不动。新手模式一个力度滑块；专业模式另加「去油光画笔」层（全力度、黑蒙版），已设好白色前景和画笔，涂到哪去到哪，画笔不透明度就是力度。需要 OpenCV 助手和 mesh_liquify 的认脸模型。详见 `de_shine/README.md`
 - `portrait_panel` — 人像面板（尚未人工验证）：滤镜 > 修图工具 > 人像面板，打开一个不挡 GIMP 的按钮窗口，按修图顺序排（第一步 / 皮肤 / 五官和脸型 / 小工具 / 收尾）。先点「开始修图」（备份并锁住原图，建「插件改动」组）；皮肤/五官按钮一键建好涂抹图层（蒙版全黑，白色涂=生效）并设好软画笔，⚙ 或 Shift+点打开参数；「手动液化 / 脸型微调 / 选择主体 / 设好笔刷 / 导出图片」直接打开对应插件对话框；锐化有两种用法：「涂抹锐化」建 USM 锐化层（蒙版全黑，自己涂）；「一键锐化」按 ⚙ 里的半径/力度/不透明度（默认 0.8 / 0.3 / 100%）直接锐化选区，没选区就锐化整张，结果是新的一层、蒙版就是选区，之后还能涂改。锐化层是点按钮那一刻画面的拷贝，之后又改了前面的步骤，点「更新锐化」按现在的画面重新生成，蒙版不变；「显示涂抹范围」把蒙版显示成红色，「涂/擦切换」互换黑白。灰色按钮=没装。安装时自动带上它调用的插件。
 - `action_record` — 动作录制（尚未人工验证）：开始录制、停止录制、播放动作。只记下带参数的一键频率分离、加深减淡搭建和选出主体。手绘、液化笔触和点修复单击不录，因为它们要画布上的一个点。内置「自然修图准备」不用先录。详见 `action_record/README.md`
@@ -153,7 +153,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Components subject_mask,ra
 | mesh_liquify | ours | – | 柔和网格液化（推移/膨胀/收缩/旋转/还原） |
 | spot_heal | ours | resynthesizer | 点修复小斑，细线不涂（尚未人工验证） |
 | dnb_flow | ours | – | 轻柔加深减淡笔触，流量和不透明度分开（尚未人工验证） |
-| subject_mask | ours | mesh_liquify | 选出主体或脸部皮肤，边缘略虚，不是发丝抠图（尚未人工验证） |
+| subject_mask | ours | mesh_liquify | 选出主体或脸部皮肤（自带 person 分割 ONNX；回退 GrabCut），边缘略虚，不是发丝抠图（尚未人工验证） |
 | action_record | ours | – / fsep_oneclick, dnb_setup, subject_mask | 录下并重放频率分离、加深减淡搭建、选出主体（尚未人工验证） |
 | portrait_brush | ours | – / fsep_oneclick, dnb_setup | 人像笔刷：柔圆/毛孔/发丝笔刷，一键设好修图用的笔刷和低不透明度（尚未人工验证） |
 | raw2tiff | ours | rawtherapee / batch_export | RAW→16 位 TIFF，`~/.local/bin/raw2tiff` |

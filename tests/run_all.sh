@@ -70,6 +70,10 @@ for p in $PLUGINS; do
         if [ $GUI = 1 ]; then PP_TEST_IMAGE=$FACE sh tests/portrait_panel/gui_close_xvfb.sh :97 > "$L/portrait_panel-gui.log" 2>&1; check $p portrait_panel-gui "GUI CLOSE OK"
             bash tests/portrait_panel/gui_undo_xvfb.sh :95 "$FACE" > "$L/portrait_panel-gui-undo.log" 2>&1; check $p portrait_panel-gui-undo "GUI_PP OK"
         else NOTE[$p]="GUI skipped (missing:$NOGUI)"; fi ;;
+    subject_mask)
+        smoke $p
+        python3 subject_mask/test_seg_helper.py > "$L/subject_mask-seg.log" 2>&1
+        check $p subject_mask-seg "SEG_HELPER OK" ;;
     fsep_oneclick)
         smoke $p
         gc fsep_oneclick-test "exec(open('fsep_oneclick/test_fsep.py').read())" FS_OUT=$L/fs; check $p fsep_oneclick-test "FSEP_TEST OK" ;;

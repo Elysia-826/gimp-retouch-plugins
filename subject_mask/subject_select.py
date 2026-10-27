@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # Subject / skin masks for subject_mask. OpenCV runs here, not inside GIMP.
 # Prints one JSON object on stdout. Not a GIMP plugin.
-# The subject edge is GrabCut (or border color) plus a short dark-pixel
-# expansion. That is not a hair matte.
+# Subject mode prefers seg_mnv3s.onnx (person class); falls back to GrabCut
+# (or border color) plus a short dark-pixel expansion. Not a hair matte.
+# Skin mode still uses YuNet only.
 import json
 import sys
 
@@ -253,6 +254,51 @@ def _ear_zones(mid, fg, face, s):
     return added
 
 
+def _seg_model_path():
+    import os
+    env = os.environ.get("SUBJECT_SEG_MODEL")
+    if env and os.path.isfile(env):
+        return os.path.abspath(env)
+    here = os.path.dirname(os.path.abspath(__file__))
+    cand = os.path.join(here, "seg_mnv3s.onnx")
+    if os.path.isfile(cand):
+        return cand
+    return None
+
+
+def _subject_from_seg(img, model):
+    """Person mask from the bundled MobileNetV3-Small LR-ASPP ONNX via cv2.dnn.
+
+    Input is RGB float 0..1; ImageNet mean/std lives inside the graph.
+    Returns (mask_uint8, note) or (None, reason) when the result is unusable.
+    """
+    import cv2
+    h, w = img.shape[:2]
+    longside = 448
+    small, _ = _resize_long(img, longside)
+    sh, sw = small.shape[:2]
+    rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+    blob = np.ascontiguousarray(rgb.transpose(2, 0, 1)[None])
+    net = cv2.dnn.readNetFromONNX(model)
+    net.setInput(blob)
+    out = net.forward()
+    if out is None or len(out.shape) != 4 or out.shape[1] < 3:
+        return None, "seg-bad-out"
+    pred = out[0].argmax(axis=0).astype(np.uint8)
+    person = np.where(pred == 2, 255, 0).astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats((person > 0).astype(np.uint8), 8)
+    if n <= 1:
+        return None, "seg-empty"
+    keep = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    person = np.where(labels == keep, 255, 0).astype(np.uint8)
+    frac = float((person > 0).mean())
+    if frac < 0.01 or frac > 0.95:
+        return None, "seg-frac"
+    person = _fill_enclosed(person)
+    person = cv2.GaussianBlur(person, (0, 0), 0.8)
+    return _upscale(person, w, h), "seg-mnv3s"
+
+
 def _subject_from_face(img, face):
     import cv2
     # GrabCut samples its color model at random. Pin it so one photo stays stable.
@@ -441,15 +487,24 @@ def main():
             print(json.dumps({"ok": False, "error": "no-face", "note": note}))
             return 0
         mask = _skin(img, face)
-    elif face is not None:
-        mask = _subject_from_face(img, face)
-        note = "grabcut-plus-dark-edge"
     else:
-        mask, frac = _subject_from_border(img)
-        note = "border-color"
-        if frac < 0.01 or frac > 0.92:
-            print(json.dumps({"ok": False, "error": "no-subject", "fg": frac, "note": note}))
-            return 0
+        mask = None
+        seg = _seg_model_path()
+        if seg is not None:
+            try:
+                mask, note = _subject_from_seg(img, seg)
+            except Exception:
+                mask, note = None, "seg-fail"
+        if mask is None:
+            if face is not None:
+                mask = _subject_from_face(img, face)
+                note = "grabcut-plus-dark-edge"
+            else:
+                mask, frac = _subject_from_border(img)
+                note = "border-color"
+                if frac < 0.01 or frac > 0.92:
+                    print(json.dumps({"ok": False, "error": "no-subject", "fg": frac, "note": note}))
+                    return 0
     _write_pgm(out_path, mask)
     payload = {
         "ok": True,

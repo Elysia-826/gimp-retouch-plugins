@@ -6,7 +6,7 @@ batch_export     |ours       |-          |-            |linux,windows|n|批量�
 mesh_liquify     |ours       |-          |-            |linux,windows|n|柔和网格液化：推移/膨胀/收缩/旋转/还原，可沿「液化笔触」图层画线推移（可反向），可按笔撤销，可按脸微调眼睛/下颌/鼻宽（尚未人工验证）
 spot_heal        |ours       |resynthesizer|-            |linux,windows|n|点修复：单击小斑用周围纹理补上，细线不涂（尚未人工验证）
 dnb_flow         |ours       |-          |dnb_setup    |linux,windows|n|轻柔涂抹：在灰色加深减淡层上按流量叠、不透明度封顶（尚未人工验证）
-subject_mask     |ours       |mesh_liquify|-            |linux,windows|n|选出主体或脸部皮肤：边缘略虚，不是发丝抠图（尚未人工验证）
+subject_mask     |ours       |mesh_liquify|-            |linux,windows|n|选出主体或脸部皮肤：自带 person 分割 ONNX，回退 GrabCut；边缘略虚，不是发丝抠图（尚未人工验证）
 action_record     |ours       |-          |fsep_oneclick,dnb_setup,subject_mask|linux,windows|n|动作录制：记下频率分离、加深减淡搭建和选出主体，按名字再播放（尚未人工验证）
 portrait_brush    |ours       |-          |fsep_oneclick,dnb_setup|linux,windows|n|人像笔刷：柔圆、皮肤毛孔、细发丝三支自制笔刷，一键设好加深减淡/皮肤纹理/修复仿制/发丝的笔刷、大小和低不透明度（尚未人工验证）
 de_shine          |ours       |mesh_liquify|-            |linux,windows|n|去油光：自动找出皮肤油光并压暗（只动低频，保留纹理），结果放在带蒙版的新图层；专业模式另给「去油光画笔」层手动涂（尚未人工验证）

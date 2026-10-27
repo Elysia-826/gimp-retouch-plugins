@@ -152,6 +152,69 @@ def main():
         if abs(left - right) > 0.25:
             die("selfie L/R gap too big: %.3f" % abs(left - right))
 
+        # Both ears: skin-like pixels just outside the face box (eye to lobe)
+        # must be mostly selected; wood further out must stay out.
+        import numpy as np
+        try:
+            import cv2
+        except ImportError:
+            die("cv2 required for ear check")
+        img = cv2.imread(selfie)
+        if img is None:
+            die("selfie unreadable for ear check")
+        sys.path.insert(0, HERE)
+        import subject_select as ss
+        if not os.path.isfile(YUNET):
+            die("yunet missing for ear check")
+        face = ss._detect(img, YUNET)
+        if face is None:
+            die("selfie ear check needs face landmarks")
+        fbx, fby, fbw, fbh = face["box"]
+        fre, fle = face["right_eye"], face["left_eye"]
+        fnose = face.get("nose") or [fbx + 0.5 * fbw, fby + 0.55 * fbh]
+        zy1 = int(min(fre[1], fle[1]))
+        zy2 = int(fnose[1] + 0.08 * fbh)
+        mid_img, _ = ss._resize_long(img, 1600)
+        yl = ss._face_yellow_limit(mid_img, face, mid_img.shape[1] / float(w3)) + 14.0
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB).astype(np.float32)
+        mask_arr = np.frombuffer(bytes(raw3), dtype=np.uint8).reshape(h3, w3)
+
+        def ear_recall(x0, x1):
+            x0 = max(0, int(x0))
+            x1 = min(w3, int(x1))
+            if x1 <= x0 or zy2 <= zy1:
+                return 1.0, 0.0
+            zone = lab[zy1:zy2, x0:x1]
+            skin = (
+                (zone[:, :, 1] > 134)
+                & (zone[:, :, 2] <= yl)
+                & (zone[:, :, 0] > 35)
+                & (zone[:, :, 0] < 210)
+            )
+            sel = mask_arr[zy1:zy2, x0:x1] > 127
+            nskin = int(skin.sum())
+            if nskin < 50:
+                return 1.0, 0.0
+            rec = float((skin & sel).sum()) / float(nskin)
+            woodish = float((sel & (zone[:, :, 2] > 160)).sum()) / max(
+                1, int(sel.sum()))
+            return rec, woodish
+
+        face_r = fbx + fbw
+        rr, rw = ear_recall(face_r, face_r + 0.12 * fbw)
+        lr, lw = ear_recall(fbx - 0.12 * fbw, fbx)
+        print(
+            "SEG_HELPER selfie ears R_rec=%.3f L_rec=%.3f "
+            "R_woodish=%.3f L_woodish=%.3f" % (rr, lr, rw, lw),
+            flush=True,
+        )
+        if rr < 0.90:
+            die("selfie right ear recall too low: %.3f" % rr)
+        if lr < 0.90:
+            die("selfie left ear recall too low: %.3f" % lr)
+        if rw > 0.15:
+            die("selfie right ear hang took too much wood: %.3f" % rw)
+
     print("SEG_HELPER OK", flush=True)
 
 

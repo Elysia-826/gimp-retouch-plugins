@@ -149,6 +149,13 @@ def _person_grabcut(small, face, sx, sy):
     ty1 = int((by + 1.02 * bh) * sy)
     if tx2 > tx1 and ty1 < sh - 1:
         g[ty1:sh - 1, tx1:tx2] = cv2.GC_FGD
+    # Keep the whole face box as sure FG so GrabCut cannot chew into a cheek.
+    fx1 = max(0, int(bx * sx))
+    fx2 = min(sw, int((bx + bw) * sx))
+    fy1 = max(0, int(by * sy))
+    fy2 = min(sh, int((by + bh) * sy))
+    if fx2 > fx1 and fy2 > fy1:
+        g[fy1:fy2, fx1:fx2] = cv2.GC_FGD
     # A tight crop can leave no background label at all; GrabCut needs some.
     if int(((g == cv2.GC_BGD) | (g == cv2.GC_PR_BGD)).sum()) < 50:
         edge_rows = max(2, int(0.02 * sh))
@@ -196,9 +203,12 @@ def _face_yellow_limit(mid, face, s):
 
 
 def _ear_zones(mid, fg, face, s):
-    """Ears sit just outside the face box. Add pixels there that touch the
-    head, differ in hue from the background in the same rows, and are not
-    yellower than the face. Returns the added mask (0/255)."""
+    """Grow the mask into skin-like pixels just outside the face box.
+
+    Ears sit outside YuNet's box and are often warmer than the cheek sample,
+    so a short grow from the head into LAB-skin pixels (eye to lobe) covers
+    them without taking the wood behind. Returns the added mask (0/255).
+    """
     import cv2
     mh, mw = fg.shape
     bx, by, bw, bh = face["box"]
@@ -206,52 +216,39 @@ def _ear_zones(mid, fg, face, s):
     le = face.get("left_eye")
     mr = face.get("mouth_right")
     ml = face.get("mouth_left")
+    nose = face.get("nose")
     if not (re and le and mr and ml):
         return np.zeros_like(fg)
     lab = cv2.cvtColor(mid, cv2.COLOR_BGR2LAB).astype(np.float32)
-    yellow_limit = _face_yellow_limit(mid, face, s)
-    ey = min(re[1], le[1])
-    my = max(mr[1], ml[1])
-    zy1 = max(0, int(ey * s))
-    zy2 = min(mh, int((my + 0.05 * bh) * s))
-    step = max(4, int(0.05 * bh * s))
-    added = np.zeros_like(fg)
-    touch = cv2.dilate(fg, np.ones((3, 3), np.uint8))
+    # Ears run warmer than the inner-face yellow sample; wood is still above this.
+    yellow_limit = _face_yellow_limit(mid, face, s) + 14.0
+    y_bot = (nose[1] + 0.08 * bh) if nose else (
+        min(re[1], le[1]) + 0.55 * (max(mr[1], ml[1]) - min(re[1], le[1])))
+    zy1 = max(0, int(min(re[1], le[1]) * s))
+    zy2 = min(mh, int(y_bot * s))
+    allow = fg.copy()
+    outward = 0.10
     for side in (0, 1):
         if side == 0:
-            zx1, zx2 = bx - 0.16 * bw, bx + 0.04 * bw
+            zx1, zx2 = bx - outward * bw, bx + 0.04 * bw
         else:
-            zx1, zx2 = bx + bw - 0.04 * bw, bx + bw + 0.16 * bw
+            zx1, zx2 = bx + bw - 0.04 * bw, bx + bw + outward * bw
         zx1 = max(0, int(zx1 * s))
         zx2 = min(mw, int(zx2 * s))
         if zx2 - zx1 < 4 or zy2 - zy1 < 4:
             continue
-        cols = slice(0, (zx1 + zx2) // 2) if side == 0 else slice((zx1 + zx2) // 2, mw)
-        cand = np.zeros(fg.shape, bool)
-        for y0 in range(zy1, zy2, step):
-            y1 = min(zy2, y0 + step)
-            rows = slice(max(0, y0 - step), min(mh, y1 + step))
-            bgpx = lab[rows, cols][fg[rows, cols] == 0]
-            if len(bgpx) < 20:
-                continue
-            ref = np.median(bgpx, axis=0)
-            spread = np.median(np.abs(bgpx - ref), axis=0)
-            dl = lab[y0:y1, zx1:zx2] - ref
-            # Ignore lightness. A shadow on the same surface differs from the
-            # lit part mostly in L (wood beside the hair); an ear differs in hue.
-            d = np.sqrt(dl[:, :, 1] ** 2 + dl[:, :, 2] ** 2)
-            thr = max(8.0, 3.0 * float(np.hypot(spread[1], spread[2])))
-            not_wood = lab[y0:y1, zx1:zx2, 2] <= yellow_limit
-            cand[y0:y1, zx1:zx2] = (d > thr) & not_wood
-        cand = (cand & (fg == 0)).astype(np.uint8) * 255
-        cand = cv2.morphologyEx(
-            cand, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
-        n, labels = cv2.connectedComponents(cand)
-        for i in range(1, n):
-            comp = labels == i
-            if (touch[comp] > 0).any():
-                added[comp] = 255
-    return added
+        zone = lab[zy1:zy2, zx1:zx2]
+        skin = (
+            (zone[:, :, 1] > 134)
+            & (zone[:, :, 2] <= yellow_limit)
+            & (zone[:, :, 0] > 35)
+            & (zone[:, :, 0] < 210)
+        )
+        allow[zy1:zy2, zx1:zx2] = np.maximum(
+            allow[zy1:zy2, zx1:zx2], skin.astype(np.uint8) * 255)
+    radius = max(6, int(0.10 * bw * s))
+    grown = _grow(fg, allow, radius)
+    return np.where((grown > 0) & (fg == 0), 255, 0).astype(np.uint8)
 
 
 def _seg_model_path():

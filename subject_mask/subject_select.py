@@ -302,15 +302,18 @@ def _seg_face_cover_ok(mask, face):
 def _subject_from_seg(img, model):
     """Person mask from the bundled MobileNetV3-Small LR-ASPP ONNX via cv2.dnn.
 
-    Input is RGB float 0..1; ImageNet mean/std lives inside the graph.
-    Returns (mask_uint8, note) or (None, reason) when the result is unusable.
+    Model input is fixed 1x3x448x448 (OpenCV 4.x DNN rejects dynamic Shape).
+    Long side is resized to 448 then stretched to square; RGB float 0..1;
+    ImageNet mean/std lives inside the graph. Returns (mask_uint8, note) or
+    (None, reason) when the result is unusable.
     """
     import cv2
     h, w = img.shape[:2]
-    longside = 448
-    small, _ = _resize_long(img, longside)
+    side = 448
+    small, _ = _resize_long(img, side)
     sh, sw = small.shape[:2]
-    rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+    square = cv2.resize(small, (side, side), interpolation=cv2.INTER_LINEAR)
+    rgb = cv2.cvtColor(square, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     blob = np.ascontiguousarray(rgb.transpose(2, 0, 1)[None])
     net = cv2.dnn.readNetFromONNX(model)
     net.setInput(blob)
@@ -319,6 +322,7 @@ def _subject_from_seg(img, model):
         return None, "seg-bad-out"
     pred = out[0].argmax(axis=0).astype(np.uint8)
     person = np.where(pred == 2, 255, 0).astype(np.uint8)
+    person = cv2.resize(person, (sw, sh), interpolation=cv2.INTER_LINEAR)
     n, labels, stats, _ = cv2.connectedComponentsWithStats((person > 0).astype(np.uint8), 8)
     if n <= 1:
         return None, "seg-empty"

@@ -299,7 +299,109 @@ def _seg_face_cover_ok(mask, face):
     return True
 
 
-def _subject_from_seg(img, model):
+def _keep_subject_parts(labels, stats, n):
+    """Largest component plus pieces that belong to the same person.
+
+    Seg nets often split feet/boots or a hand off the body at a thin gap.
+    A piece is kept only when it is not tiny (>= 2% of the main body), sits
+    close to the body (within 6% of the body's bbox diagonal), lies mostly
+    inside the body's horizontal span, does not reach more than 12% of the
+    body height below the body's lowest point, and is not a flat sliver
+    (wider than 3x its height, typical of floor and cast shadows).
+    """
+    import cv2
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    main = 1 + int(np.argmax(areas))
+    main_area = float(stats[main, cv2.CC_STAT_AREA])
+    keep = labels == main
+    if n <= 2:
+        return np.where(keep, 255, 0).astype(np.uint8)
+    mx, my, bw, bh = (int(stats[main, c]) for c in (cv2.CC_STAT_LEFT, cv2.CC_STAT_TOP, cv2.CC_STAT_WIDTH, cv2.CC_STAT_HEIGHT))
+    reach = 0.06 * float(np.hypot(bw, bh))
+    dist = cv2.distanceTransform((~keep).astype(np.uint8), cv2.DIST_L2, 3)
+    for i in range(1, n):
+        if i == main:
+            continue
+        a = float(stats[i, cv2.CC_STAT_AREA])
+        if a < 0.02 * main_area:
+            continue
+        px, py, pw, ph = (int(stats[i, c]) for c in (cv2.CC_STAT_LEFT, cv2.CC_STAT_TOP, cv2.CC_STAT_WIDTH, cv2.CC_STAT_HEIGHT))
+        overlap = min(px + pw, mx + bw) - max(px, mx)
+        if overlap < 0.5 * pw:
+            continue
+        if py + ph > my + bh + 0.12 * bh:
+            continue
+        if pw > 3 * ph:
+            continue
+        part = labels == i
+        if float(dist[part].min()) <= reach:
+            keep |= part
+    return np.where(keep, 255, 0).astype(np.uint8)
+
+def _trim_ground(small, person):
+    """Drop floor/shadow pixels the net glued onto the legs.
+
+    Only for standing full-body shapes (box at least twice as tall as
+    wide, not cut wide by the frame bottom), and only the lower
+    30% of the person's box is reconsidered: GrabCut there
+    with the upper body as sure foreground and everything outside a dilated
+    mask as sure background. Pixels GrabCut calls background are removed,
+    then only parts still joined to the body are kept. Pieces that were
+    already separate from the main blob are never trimmed. If the trim would
+    remove more than 70% of the lower band it is skipped as unreliable.
+    """
+    import cv2
+    m = person > 127
+    ys, xs = np.nonzero(m)
+    if ys.size < 500:
+        return person
+    y0, y1 = int(ys.min()), int(ys.max())
+    bh = y1 - y0 + 1
+    if bh < 60:
+        return person
+    cut = y0 + int(0.70 * bh)
+    h, w = m.shape
+    bw = int(xs.max()) - int(xs.min()) + 1
+    if bh < 2.0 * bw:
+        return person  # not a standing full-body shape (selfie, half body)
+    if m[h - 2:].any(axis=0).sum() > 0.35 * bw:
+        return person  # torso cut by the frame bottom: no feet, no floor
+    r = max(3, int(0.012 * bh))
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+    sure = cv2.erode(m.astype(np.uint8), k) > 0
+    near = cv2.dilate(m.astype(np.uint8), k, iterations=2) > 0
+    gc = np.full((h, w), cv2.GC_BGD, np.uint8)
+    gc[near] = cv2.GC_PR_BGD
+    gc[m] = cv2.GC_PR_FGD
+    gc[:cut][m[:cut]] = cv2.GC_FGD
+    gc[:cut][sure[:cut] == 0 & m[:cut]] = cv2.GC_PR_FGD
+    bgd = np.zeros((1, 65), np.float64); fgd = np.zeros((1, 65), np.float64)
+    try:
+        cv2.grabCut(small, gc, None, bgd, fgd, 4, cv2.GC_INIT_WITH_MASK)
+    except cv2.error:
+        return person
+    fg = (gc == cv2.GC_FGD) | (gc == cv2.GC_PR_FGD)
+    band = m.copy(); band[:cut] = False
+    # Detached pieces were already vetted by _keep_subject_parts (boots,
+    # hands); only trim what is glued onto the largest blob.
+    n0, lab0, st0, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), 8)
+    main0 = lab0 == 1 + int(np.argmax(st0[1:, cv2.CC_STAT_AREA]))
+    drop = band & ~fg & main0
+    if band.sum() == 0 or drop.sum() > 0.70 * band.sum():
+        return person
+    out = m & ~drop
+    opened = cv2.morphologyEx(out.astype(np.uint8), cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))) > 0
+    near_drop = cv2.dilate(drop.astype(np.uint8), k) > 0
+    out = np.where(near_drop, opened, out)
+    out[:cut] = m[:cut]
+    out |= m & ~main0
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(out.astype(np.uint8), 8)
+    if n <= 1:
+        return person
+    return _keep_subject_parts(labels, stats, n)
+
+
+def _subject_from_seg(img, model, face=None):
     """Person mask from the bundled MobileNetV3-Small LR-ASPP ONNX via cv2.dnn.
 
     Model input is fixed 1x3x448x448 (OpenCV 4.x DNN rejects dynamic Shape).
@@ -326,8 +428,11 @@ def _subject_from_seg(img, model):
     n, labels, stats, _ = cv2.connectedComponentsWithStats((person > 0).astype(np.uint8), 8)
     if n <= 1:
         return None, "seg-empty"
-    keep = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-    person = np.where(labels == keep, 255, 0).astype(np.uint8)
+    person = _keep_subject_parts(labels, stats, n)
+    # Trim only a mask main() would accept anyway: trimming must not turn a
+    # mask that fails the face-cover check into one that passes it.
+    if face is None or _seg_face_cover_ok(_upscale(person, w, h), face):
+        person = _trim_ground(small, person)
     frac = float((person > 0).mean())
     if frac < 0.01 or frac > 0.95:
         return None, "seg-frac"
@@ -529,7 +634,7 @@ def main():
         seg = _seg_model_path()
         if seg is not None:
             try:
-                mask, note = _subject_from_seg(img, seg)
+                mask, note = _subject_from_seg(img, seg, face)
             except Exception:
                 mask, note = None, "seg-fail"
             if mask is not None and face is not None and not _seg_face_cover_ok(mask, face):

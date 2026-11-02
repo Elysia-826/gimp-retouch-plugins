@@ -67,8 +67,14 @@ def main():
     info, data = run_subject(PHOTO, True)
     if not info.get("ok"):
         die("helper not ok: %s" % info)
-    if info.get("note") != "seg-mnv3s":
-        die("expected note seg-mnv3s, got %s" % info.get("note"))
+    note1 = info.get("note")
+    # With a face and cover OK, subject path GrabCut-refines → seg-mnv3s-grabcut.
+    # No face keeps pure seg-mnv3s.
+    if note1 == "seg-mnv3s-grabcut":
+        if not info.get("face"):
+            die("seg-mnv3s-grabcut without face: %s" % info)
+    elif note1 != "seg-mnv3s":
+        die("expected note seg-mnv3s or seg-mnv3s-grabcut, got %s" % note1)
     w, h, raw = data
     vals = memoryview(raw)
     cx, cy = w // 2, h // 2
@@ -102,8 +108,14 @@ def main():
             die("selfie not ok: %s" % info3)
         note3 = info3.get("note")
         # Half-body selfie: shoulder-cut seg must fall back; good seg may stay.
-        if note3 not in ("seg-mnv3s", "grabcut-plus-dark-edge"):
+        if note3 not in (
+            "seg-mnv3s",
+            "seg-mnv3s-grabcut",
+            "grabcut-plus-dark-edge",
+        ):
             die("selfie unexpected note: %s" % info3)
+        if note3 == "seg-mnv3s" and info3.get("face"):
+            die("selfie with face should GrabCut-refine, got pure seg: %s" % info3)
         if not info3.get("face"):
             die("selfie needs face for cover check: %s" % info3)
         w3, h3, raw3 = data3

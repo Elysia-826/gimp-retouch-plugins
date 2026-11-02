@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # Subject / skin masks for subject_mask. OpenCV runs here, not inside GIMP.
 # Prints one JSON object on stdout. Not a GIMP plugin.
-# Subject mode prefers seg_mnv3s.onnx (person class); falls back to GrabCut
-# (or border color) plus a short dark-pixel expansion. Not a hair matte.
+# Subject mode prefers seg_mnv3s.onnx (person class); when a face is
+# present and cover is OK, GrabCut-refines the seg mask. Face-cover fail
+# falls back to full GrabCut (or border color) plus dark-pixel expansion.
+# Not a hair matte.
 # Skin mode still uses YuNet only.
 import json
 import sys
@@ -401,6 +403,105 @@ def _trim_ground(small, person):
     return _keep_subject_parts(labels, stats, n)
 
 
+
+def _refine_seg_with_grabcut(img, mask, face):
+    """GrabCut-refine a face-cover-ok seg mask so dug-out shoulders get a second chance.
+
+    Long side 800 (same as _person_grabcut). Seeds: eroded mask = sure FG,
+    mask = probable FG, dilated ring below the face = probable FG (missing
+    shoulder/arm), rest = sure BG; face box forced sure FG. Wood-like
+    (LAB b above face yellow limit) hang beside the head is demoted before
+    GrabCut and peeled again at full resolution after — face box kept,
+    body below the face untouched. On GrabCut failure, returns the original
+    mask unchanged.
+    """
+    import cv2
+    cv2.setRNGSeed(0)
+    h, w = img.shape[:2]
+    small, _ = _resize_long(img, 800)
+    sh, sw = small.shape[:2]
+    m = cv2.resize(mask, (sw, sh), interpolation=cv2.INTER_LINEAR)
+    mbin = (m > 127).astype(np.uint8)
+    rad = max(12, int(0.04 * min(sh, sw)))
+    k_dil = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * rad + 1, 2 * rad + 1))
+    er = max(3, rad // 3)
+    k_er = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * er + 1, 2 * er + 1))
+    eroded = cv2.erode(mbin, k_er)
+    dilated = cv2.dilate(mbin, k_dil)
+    bx, by, bw, bh = face["box"]
+    sx = sw / float(w)
+    sy = sh / float(h)
+    fx1 = max(0, int(bx * sx))
+    fx2 = min(sw, int((bx + bw) * sx))
+    fy1 = max(0, int(by * sy))
+    fy2 = min(sh, int((by + bh) * sy))
+    # Ring only below the face: reclaim dug-out shoulders/arms without
+    # growing into wood beside the ears (selfie hang).
+    ring = (dilated > 0) & (mbin == 0)
+    shoulder_y = max(0, fy2 - int(0.05 * bh * sy))
+    ring[:shoulder_y, :] = False
+    g = np.full((sh, sw), cv2.GC_BGD, np.uint8)
+    g[ring] = cv2.GC_PR_FGD
+    g[mbin > 0] = cv2.GC_PR_FGD
+    g[eroded > 0] = cv2.GC_FGD
+    if fx2 > fx1 and fy2 > fy1:
+        g[fy1:fy2, fx1:fx2] = cv2.GC_FGD
+    # Demote wood hang beside the head before GrabCut (ear skin stays:
+    # its LAB b is <= face yellow limit + 14; wood sits above).
+    yl = _face_yellow_limit(small, face, sx) + 14.0
+    lab = cv2.cvtColor(small, cv2.COLOR_BGR2LAB).astype(np.float32)
+    wood = lab[:, :, 2] > yl
+    head_x0 = max(0, int((bx - 0.25 * bw) * sx))
+    head_x1 = min(sw, int((bx + bw + 0.25 * bw) * sx))
+    head_y0 = max(0, int((by - 0.15 * bh) * sy))
+    head_y1 = min(sh, shoulder_y)  # never demote body/shoulders
+    head = np.zeros((sh, sw), bool)
+    if head_y1 > head_y0 and head_x1 > head_x0:
+        head[head_y0:head_y1, head_x0:head_x1] = True
+    demote = wood & head
+    if fx2 > fx1 and fy2 > fy1:
+        demote[fy1:fy2, fx1:fx2] = False
+    g[demote] = cv2.GC_BGD
+    if fx2 > fx1 and fy2 > fy1:
+        g[fy1:fy2, fx1:fx2] = cv2.GC_FGD
+    if int(((g == cv2.GC_BGD) | (g == cv2.GC_PR_BGD)).sum()) < 50:
+        return mask
+    if int((g == cv2.GC_FGD).sum()) < 20:
+        return mask
+    bgd = np.zeros((1, 65), np.float64)
+    fgd = np.zeros((1, 65), np.float64)
+    try:
+        cv2.grabCut(small, g, None, bgd, fgd, 5, cv2.GC_INIT_WITH_MASK)
+    except cv2.error:
+        return mask
+    out = np.where((g == cv2.GC_FGD) | (g == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
+    out = _fill_enclosed(out)
+    out = cv2.GaussianBlur(out, (0, 0), 0.8)
+    full = _upscale(out, w, h)
+    # Full-res peel: blur can re-bleed soft wood edges; strip at native size.
+    # Face box kept; body below face bottom untouched; ear skin (b <= yl) kept.
+    yl_f = _face_yellow_limit(img, face, 1.0) + 14.0
+    lab_f = cv2.cvtColor(img, cv2.COLOR_BGR2LAB).astype(np.float32)
+    wood_f = lab_f[:, :, 2] > yl_f
+    sh_y = max(0, int(by + bh - 0.05 * bh))
+    hx0 = max(0, int(bx - 0.25 * bw))
+    hx1 = min(w, int(bx + bw + 0.25 * bw))
+    hy0 = max(0, int(by - 0.15 * bh))
+    hy1 = min(h, sh_y)
+    peel = np.zeros((h, w), bool)
+    if hy1 > hy0 and hx1 > hx0:
+        peel[hy0:hy1, hx0:hx1] = wood_f[hy0:hy1, hx0:hx1]
+    ffx1 = max(0, int(bx))
+    ffx2 = min(w, int(bx + bw))
+    ffy1 = max(0, int(by))
+    ffy2 = min(h, int(by + bh))
+    if ffx2 > ffx1 and ffy2 > ffy1:
+        peel[ffy1:ffy2, ffx1:ffx2] = False
+    full[peel & (full > 0)] = 0
+    return full
+
+
+
 def _subject_from_seg(img, model, face=None):
     """Person mask from the bundled MobileNetV3-Small LR-ASPP ONNX via cv2.dnn.
 
@@ -639,6 +740,15 @@ def main():
                 mask, note = None, "seg-fail"
             if mask is not None and face is not None and not _seg_face_cover_ok(mask, face):
                 mask, note = None, "seg-face-cover"
+            elif (
+                mask is not None
+                and face is not None
+                and note == "seg-mnv3s"
+            ):
+                # Face-cover OK: still GrabCut-refine so dug-out shoulders
+                # get a second chance (r3 often passes cover yet clips a shoulder).
+                mask = _refine_seg_with_grabcut(img, mask, face)
+                note = "seg-mnv3s-grabcut"
         if mask is None:
             if face is not None:
                 mask = _subject_from_face(img, face)
